@@ -279,7 +279,7 @@ both come back empty. `LOG_LEVEL=debug` additionally passes the extractor's raw 
 the Reservations panel is hidden only when **neither** extractor is available — an instance running the AI Parsing
 addon still offers it with `bookingImport: false`.
 
-Booking import can also fall back to an AI model for documents KDE Itinerary can't read. That feature (the **AI Parsing** addon) is configured in the UI; the only environment variable it reads is `LLM_TIMEOUT_MS` below. See [AI-Booking-Import](AI-Booking-Import).
+Booking import can also fall back to an AI model for documents KDE Itinerary can't read. That feature (the **AI Parsing** addon) is configured in the UI; the only environment variables it reads are `LLM_TIMEOUT_MS` and `LLM_MAX_TOKENS` below. See [AI-Booking-Import](AI-Booking-Import).
 
 ---
 
@@ -360,6 +360,7 @@ next key rotation or admin reset would quietly switch the file back to WAL.
 | `OVERPASS_URL`            | Custom [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) endpoint(s) used by the map's POI "explore" search, comma-separated. When set it **replaces** the bundled public mirrors — point it at an internal or self-hosted Overpass instance when the public mirrors are unreachable from your network (e.g. firewalled/locked-down egress in a Kubernetes cluster). Entries that aren't valid `http(s)` URLs are ignored. If you don't run your own Overpass but the public mirrors throttle TREK, first make sure `APP_URL` (or `ALLOWED_ORIGINS`) is set: that alone gives outbound Overpass/Nominatim requests a unique User-Agent, which the public mirrors rate-limit far less. | bundled public mirrors |
 | `OVERPASS_TIMEOUT_MS`     | Per-endpoint timeout (in milliseconds) for Overpass POI requests. Endpoints race in parallel and one that hasn't answered within this window is abandoned so a faster mirror can win. Raise it if you run a slow self-hosted Overpass instance. Invalid values abort startup. | `12000` |
 | `LLM_TIMEOUT_MS`          | How long (in milliseconds) one AI-parsing call may take before it is abandoned. One ceiling for every provider, applied to the abort signal and to the underlying HTTP client alike. The default is generous so heavier parsing work fits without a code change; lower it if you use a cloud provider and would rather fail fast. Invalid values abort startup. | `900000` (15 min) |
+| `LLM_MAX_TOKENS`          | The most tokens an OpenAI-compatible provider (OpenAI and anything speaking its chat-completions API) may spend on a single reply, sent as `max_tokens` — or as `max_completion_tokens` for the models that require that spelling. Raise it when a long, multi-leg document imports empty or short because the model's answer was cut off; the value is an upper bound, not a reservation, so a larger one costs nothing until a document needs the room. The real ceiling belongs to the model, so if you set this above what the model accepts, that request falls back to `4096` instead of failing. Does not apply to the Anthropic provider, which has its own budget. Invalid values abort startup. | `4096` |
 
 ---
 

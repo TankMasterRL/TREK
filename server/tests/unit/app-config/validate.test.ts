@@ -49,6 +49,19 @@ describe('validateEnvAtBoot', () => {
     expect(() => validateEnvAtBoot({ LLM_TIMEOUT_MS: '' })).not.toThrow();
   });
 
+  it('refuses a response cap that is not a whole number of tokens', () => {
+    // `max_tokens` / `max_completion_tokens` are integers in the OpenAI schema.
+    // 0 is the one that would boot happily and be wrong on every document: the
+    // model answers with an empty, length-truncated completion.
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '0' })).toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '-1' })).toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '4096.5' })).toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: 'lots' })).toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '1000001' })).toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '16384' })).not.toThrow();
+    expect(() => validateEnvAtBoot({ LLM_MAX_TOKENS: '' })).not.toThrow();
+  });
+
   it('treats blank values as unset (defaults apply, no error)', () => {
     expect(() => validateEnvAtBoot({ DEMO_MODE: '', PORT: '  ', TZ: '' })).not.toThrow();
   });

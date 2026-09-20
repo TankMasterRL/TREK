@@ -249,6 +249,15 @@ export function deriveIntegrations(raw: RawEnv) {
      * rejects a fractional value.
      */
     llmTimeoutMs: Math.floor(positiveNumberOr(raw.LLM_TIMEOUT_MS, 900_000)),
+    /**
+     * Upper bound on the completion the OpenAI-compatible client asks for, sent
+     * as `max_tokens` (or `max_completion_tokens`, whichever the model accepts).
+     * It is a cap, not a reservation: raising it costs nothing until a document
+     * actually needs the room, and the default is the long-standing built-in, so
+     * an unset variable keeps today's behaviour exactly. Floored because the API
+     * types the field as an integer.
+     */
+    llmMaxTokens: Math.floor(positiveNumberOr(raw.LLM_MAX_TOKENS, 4096)),
     // Windows spells it Path; every other platform PATH. Split here so callers
     // get a list and never re-implement the delimiter.
     searchPath: (raw.PATH || raw.Path || '')

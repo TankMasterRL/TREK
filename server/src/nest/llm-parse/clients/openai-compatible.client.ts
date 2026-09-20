@@ -4,11 +4,16 @@ import { parseLenientJson, toReservationList } from '../lenient-json';
 import { safeFetchLlm } from '../../../utils/ssrfGuard';
 import { readEnv } from '../../../app-config';
 
-const MAX_TOKENS = 4096;
+/**
+ * The built-in cap, used when LLM_MAX_TOKENS is unset, and the value a raised
+ * cap falls back to when a model turns out not to allow it.
+ */
+const DEFAULT_MAX_TOKENS = 4096;
 
 /** What one attempt differs in. Each field is switched on by a 400 that asked for it. */
 interface RequestShape {
   tokenParam: 'max_tokens' | 'max_completion_tokens';
+  maxTokens: number;
   jsonObject: boolean;
   omitTemperature: boolean;
 }
@@ -31,6 +36,29 @@ function rejectsTemperature(detail: string): boolean {
 }
 
 /**
+ * Does this 400 body say the cap we asked for is larger than the model allows?
+ *
+ * The chat-completions schema puts NO maximum on either spelling of the field —
+ * it is a plain nullable integer, and the real ceiling is the model's own output
+ * budget (the completions schema spells the same rule out: "the token count of
+ * your prompt plus `max_tokens` cannot exceed the model's context length").
+ * Nothing static can know that number, so it is only ever learned from a
+ * response: OpenAI answers "max_tokens is too large: 100000. This model supports
+ * at most 16384 completion tokens.", vLLM/llama.cpp "This model's maximum
+ * context length is 8192 tokens. However, you requested 10096 tokens ... Please
+ * reduce the length", Mistral "max_tokens must be at most 8192".
+ *
+ * Both halves are required, for the reason rejectsTemperature needs both: a 400
+ * that merely names the parameter is usually complaining about something else
+ * (#1760's "use max_completion_tokens instead" names it and means the opposite),
+ * and a wrong guess would quietly undo a cap the operator raised on purpose.
+ */
+function rejectsTokenCap(detail: string): boolean {
+  return /max_tokens|max_completion_tokens|context length/i.test(detail)
+    && /too large|too long|too many|at most|less than or equal|greater than|exceed|reduce the length|maximum context/i.test(detail);
+}
+
+/**
  * OpenAI-compatible chat-completions client. Covers both the "openai" cloud
  * provider and the "local" provider (Ollama / vLLM / llama.cpp / LM Studio),
  * which all expose `POST {baseUrl}/chat/completions`. Native binaries (PDF) are
@@ -44,15 +72,24 @@ function rejectsTemperature(detail: string): boolean {
  *
  * Structured output is requested as `json_schema` first; servers that only
  * support `json_object` (DeepSeek, Mistral, some vLLM/llama.cpp) reject that
- * with a 400, so the request is retried once in `json_object` mode. Two further
- * 400s are answered the same way: `max_tokens` becomes `max_completion_tokens`
- * (#1760), and "temperature is not supported" drops the parameter (#2262).
+ * with a 400, so the request is retried once in `json_object` mode. Three
+ * further 400s are answered the same way: `max_tokens` becomes
+ * `max_completion_tokens` (#1760), "temperature is not supported" drops the
+ * parameter (#2262), and a cap the model will not accept drops back to
+ * DEFAULT_MAX_TOKENS.
  *
  * Those retries are a loop over what the server actually said, not a fixed
  * chain. A reasoning model rejects `max_tokens` AND `temperature`, the API names
  * only one parameter per response, and it may name either first — a chain of
  * one-shot ifs survives only one of the two orders. Each remedy applies at most
- * once, so this adds at most three extra requests.
+ * once, so this adds at most four extra requests.
+ *
+ * The size of the reply is capped by LLM_MAX_TOKENS (default DEFAULT_MAX_TOKENS).
+ * The API leaves that field optional and unbounded — the ceiling belongs to the
+ * model, not to the schema — so a document whose reservations do not fit in the
+ * default needs the operator to raise it, and a value the model refuses falls
+ * back rather than failing the import. A reply the cap did cut short is reported
+ * instead of being swallowed as "no reservations found"; see extract().
  */
 export class OpenAiCompatibleClient implements LlmExtractionClient {
   async extract(input: LlmExtractionInput): Promise<Record<string, unknown>[]> {
@@ -83,7 +120,7 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
     const buildBody = (shape: RequestShape) => {
       const baseBody = {
         model: input.model,
-        [shape.tokenParam]: MAX_TOKENS,
+        [shape.tokenParam]: shape.maxTokens,
         // Extraction is a deterministic task — Ollama defaults to 0.7, which makes
         // small models (NuExtract) drop fields or return empty. Pin to 0, and only
         // leave it out once a server has explicitly rejected the parameter (#2262).
@@ -108,8 +145,15 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
       };
     };
 
-    const shape: RequestShape = { tokenParam: 'max_tokens', jsonObject: false, omitTemperature: false };
-    const tried = { tokenParam: false, temperature: false, jsonObject: false };
+    // One read per document, so a change to the variable takes effect on the next
+    // import rather than the next restart (readEnv() re-derives from process.env).
+    const shape: RequestShape = {
+      tokenParam: 'max_tokens',
+      maxTokens: readEnv().integrations.llmMaxTokens,
+      jsonObject: false,
+      omitTemperature: false,
+    };
+    const tried = { tokenParam: false, temperature: false, tokenCap: false, jsonObject: false };
 
     let res = await this.send(url, buildBody(shape), input.apiKey);
     let detail = res.ok ? '' : await res.text().catch(() => '');
@@ -131,6 +175,16 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
         tried.temperature = true;
         named = true;
       }
+      // A raised cap the model will not honour: come back at the built-in
+      // default rather than failing the import over a configuration value.
+      // Guarded on actually being above it, so a server that answers this way at
+      // the default doesn't buy an identical retry — that case falls through to
+      // the json_object attempt below, as any other unspecific 400 does.
+      if (!tried.tokenCap && shape.maxTokens > DEFAULT_MAX_TOKENS && rejectsTokenCap(detail)) {
+        shape.maxTokens = DEFAULT_MAX_TOKENS;
+        tried.tokenCap = true;
+        named = true;
+      }
       if (!named) {
         // NuExtract sends no response_format at all, so it has nothing to fall
         // back to and the 400 is final.
@@ -147,10 +201,32 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
     }
 
     const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { finish_reason?: string; message?: { content?: string } }[];
     };
-    const content = data.choices?.[0]?.message?.content;
-    return nuextract ? parseNuExtract(content) : parseReservations(content);
+    const choice = data.choices?.[0];
+    const content = choice?.message?.content;
+    const items = nuextract ? parseNuExtract(content) : parseReservations(content);
+
+    // `length` is the spec's "the maximum number of tokens specified in the
+    // request was reached": the reply is a fragment, and its JSON breaks off
+    // mid-object. Lenient parsing recovers nothing from that, so the only
+    // symptom an operator sees is an import that finds no reservations and
+    // explains nothing — which is exactly the case LLM_MAX_TOKENS exists to fix,
+    // and therefore the case worth naming. Whatever did parse is still returned:
+    // a partial list beats discarding the document, with the cap in the log.
+    if (choice?.finish_reason === 'length') {
+      if (items.length === 0) {
+        throw new Error(
+          `the model hit the ${shape.maxTokens}-token response limit before returning any reservation — ` +
+            'raise LLM_MAX_TOKENS, or use a model with a larger output budget',
+        );
+      }
+      console.warn(
+        `[llm-parse] Response truncated at the ${shape.maxTokens}-token limit; kept ${items.length} reservation(s). ` +
+          'Raise LLM_MAX_TOKENS to get the rest.',
+      );
+    }
+    return items;
   }
 
   private async send(url: string, body: unknown, apiKey?: string): Promise<Response> {

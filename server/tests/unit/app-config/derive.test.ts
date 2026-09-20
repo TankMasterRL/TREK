@@ -224,6 +224,18 @@ describe('deriveIntegrations', () => {
     expect(deriveIntegrations({ LLM_TIMEOUT_MS: '-1' }).llmTimeoutMs).toBe(900_000);
     expect(deriveIntegrations({ LLM_TIMEOUT_MS: '60000.5' }).llmTimeoutMs).toBe(60_000);
   });
+
+  it('reads the OpenAI-compatible response cap, defaulting to the built-in 4096', () => {
+    // A cap, not a reservation: unset has to keep the value the client used
+    // before it was configurable, or every existing install changes behaviour.
+    expect(deriveIntegrations({}).llmMaxTokens).toBe(4096);
+    expect(deriveIntegrations({ LLM_MAX_TOKENS: '16384' }).llmMaxTokens).toBe(16_384);
+    // The API types the field as an integer, so a fraction cannot go out as-is.
+    expect(deriveIntegrations({ LLM_MAX_TOKENS: '8192.7' }).llmMaxTokens).toBe(8192);
+    expect(deriveIntegrations({ LLM_MAX_TOKENS: '0' }).llmMaxTokens).toBe(4096);
+    expect(deriveIntegrations({ LLM_MAX_TOKENS: '-1' }).llmMaxTokens).toBe(4096);
+    expect(deriveIntegrations({ LLM_MAX_TOKENS: 'lots' }).llmMaxTokens).toBe(4096);
+  });
 });
 
 describe('deriveBackup', () => {
