@@ -369,7 +369,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    'Endpoint cục bộ (Ollama) được thiết lập một lần cho toàn bộ phiên bản trong phần cài đặt quản trị. Bạn vẫn có thể dùng khóa OpenAI hoặc Anthropic của riêng mình ở đây.',
+    'Endpoint cục bộ (Ollama hoặc LM Studio) được thiết lập một lần cho toàn bộ phiên bản trong phần cài đặt quản trị. Bạn vẫn có thể dùng khóa OpenAI hoặc Anthropic của riêng mình ở đây.',
   'settings.aiParsing.model': 'Mô hình',
   'settings.aiParsing.baseUrl': 'URL cơ sở',
   'settings.aiParsing.baseUrlHint': 'Nơi mô hình chạy — máy chủ Ollama cục bộ hoặc endpoint tương thích với OpenAI.',

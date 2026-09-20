@@ -7,6 +7,7 @@ import { isPdf, extractText } from './text-extract';
 import { routeExtraction, detectFlightNumbers } from './router/extraction-router';
 import { Injectable } from '@nestjs/common';
 import { kiReservationSchema } from '@trek/shared';
+import { isSelfHostedLlmProvider, SELF_HOSTED_LLM_DEFAULT_BASE_URL } from './llm-config';
 import { RuntimeEnvService } from '../app-config/runtime-env.service';
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -51,8 +52,8 @@ export class LlmParseService {
     };
 
     // Native PDF only for Anthropic (its document block reads text AND scans).
-    // OpenAI-compatible servers (incl. Ollama/NuExtract) can't ingest PDFs/`file`
-    // parts, so every other provider gets extracted text.
+    // OpenAI-compatible servers (incl. Ollama/LM Studio/NuExtract) can't ingest
+    // PDFs/`file` parts, so every other provider gets extracted text.
     try {
       if (config.provider === 'anthropic' && isPdf(file.originalName)) {
         input.file = { mimeType: MIME_BY_EXT['.pdf'], data: file.buffer };
@@ -65,8 +66,11 @@ export class LlmParseService {
         // document, so it keeps a generous window; a single booking has the essentials up top,
         // so cap it tighter to keep CPU prompt-eval fast (a 11-page rental voucher was ~200s at
         // 16k, the booking data sits in the first ~2k). Cloud single-shot keeps the tight cap.
-        const MAX_EXTRACT_CHARS =
-          config.provider !== 'local' ? 4000 : detectFlightNumbers(input.text).length > 0 ? 16000 : 6000;
+        const MAX_EXTRACT_CHARS = !isSelfHostedLlmProvider(config.provider)
+          ? 4000
+          : detectFlightNumbers(input.text).length > 0
+            ? 16000
+            : 6000;
         if (input.text.length > MAX_EXTRACT_CHARS) input.text = input.text.slice(0, MAX_EXTRACT_CHARS);
         // The extracted text IS the booking: traveller name, address, booking
         // reference. On a centrally administered install that would land in the
@@ -91,16 +95,18 @@ export class LlmParseService {
       };
     }
 
-    // Local provider (Ollama): go through the layered extraction router — vendor
-    // templates → decompose + grammar-enforced per-reservation extraction → validate
-    // + repair. Far more reliable on small CPU models than the single-shot path below
-    // (which stays for cloud providers, whose strong models handle one-shot well).
-    if (config.provider === 'local' && input.text) {
+    // A self-hosted server (Ollama, LM Studio) goes through the extraction router:
+    // one schema-enforced call the server constrains at sampling time, then the
+    // deterministic booking-wide pass. Far more reliable on small CPU models than the
+    // single-shot path below (which stays for cloud providers, whose strong models
+    // handle one-shot well).
+    if (isSelfHostedLlmProvider(config.provider) && input.text) {
       try {
         const routed = await routeExtraction(input.text, {
-          baseUrl: config.baseUrl ?? 'http://localhost:11434/v1',
+          baseUrl: config.baseUrl ?? SELF_HOSTED_LLM_DEFAULT_BASE_URL[config.provider],
           model: config.model,
           apiKey: config.apiKey,
+          provider: config.provider,
         });
         return { kiItems: routed.kiItems, warnings: [...warnings, ...routed.warnings] };
       } catch (err) {

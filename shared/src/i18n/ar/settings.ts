@@ -354,7 +354,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    'يتم إعداد نقطة نهاية محلية (Ollama) مرة واحدة للمثيل بأكمله من إعدادات المسؤول. ولا يزال بإمكانك استخدام مفتاح OpenAI أو Anthropic الخاص بك هنا.',
+    'يتم إعداد نقطة نهاية محلية (Ollama أو LM Studio) مرة واحدة للمثيل بأكمله من إعدادات المسؤول. ولا يزال بإمكانك استخدام مفتاح OpenAI أو Anthropic الخاص بك هنا.',
   'settings.aiParsing.model': 'النموذج',
   'settings.aiParsing.baseUrl': 'عنوان URL الأساسي',
   'settings.aiParsing.baseUrlHint': 'المكان الذي يعمل فيه النموذج — خادم Ollama محلي أو نقطة نهاية متوافقة مع OpenAI.',

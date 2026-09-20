@@ -1,6 +1,12 @@
 import { ADDON_IDS } from '../../addons';
 import { AddonsService } from '../addons/addons.service';
-import { decryptLlmApiKey, LLM_PROVIDERS, type LlmProvider, type ResolvedLlmConfig } from './llm-config';
+import {
+  decryptLlmApiKey,
+  isSelfHostedLlmProvider,
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type ResolvedLlmConfig,
+} from './llm-config';
 import { DatabaseService } from '../database/database.service';
 import { SettingsService } from '../settings/settings.service';
 import { Injectable } from '@nestjs/common';
@@ -65,7 +71,7 @@ export class LlmConfigResolver {
 
     // #1772: the address this server calls is instance configuration, never a
     // personal preference. The request leaves OUR network and safeFetchLlm
-    // deliberately allows loopback/LAN so a self-hosted Ollama keeps working,
+    // deliberately allows loopback/LAN so a self-hosted Ollama or LM Studio keeps working,
     // which is a reasonable trade for whoever runs the instance and a network
     // probe for anyone else. An instance has exactly one such address, so it
     // comes from the admin-set instance-wide defaults for EVERY user, including
@@ -73,10 +79,13 @@ export class LlmConfigResolver {
     // (booking import and the plugin RPC surface), and the only place that also
     // catches values already sitting in the db.
     const endpoints = this.settings.getAdminUserDefaults();
-    // 'local' is an endpoint choice too ("some address I name"), so without an
-    // admin-set local endpoint there is no config at all, never a silent
-    // redirect to a different provider.
-    if (provider === 'local' && asProvider(endpoints.llm_provider) !== 'local') return null;
+    // A self-hosted provider ('local' = Ollama, 'lmstudio' = LM Studio) is an
+    // endpoint choice too ("some address I name"), so without an admin-set
+    // endpoint there is no config at all, never a silent redirect to a
+    // different provider. The admin default must name the SAME provider: the
+    // one address an instance has belongs to one kind of server, and Ollama's
+    // native API is not LM Studio's.
+    if (isSelfHostedLlmProvider(provider) && asProvider(endpoints.llm_provider) !== provider) return null;
     const baseUrl =
       typeof endpoints.llm_base_url === 'string' && endpoints.llm_base_url.trim()
         ? endpoints.llm_base_url.trim()

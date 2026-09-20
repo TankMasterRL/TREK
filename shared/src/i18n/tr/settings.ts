@@ -364,7 +364,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    'Yerel (Ollama) uç noktası, tüm örnek için bir kez yönetici ayarlarında yapılandırılır. Kendi OpenAI veya Anthropic anahtarını burada kullanmaya devam edebilirsin.',
+    'Yerel (Ollama veya LM Studio) uç noktası, tüm örnek için bir kez yönetici ayarlarında yapılandırılır. Kendi OpenAI veya Anthropic anahtarını burada kullanmaya devam edebilirsin.',
   'settings.aiParsing.model': 'Model',
   'settings.aiParsing.baseUrl': 'Temel URL',
   'settings.aiParsing.baseUrlHint':

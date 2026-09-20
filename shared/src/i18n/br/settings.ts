@@ -366,7 +366,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    'Um endpoint local (Ollama) é configurado uma única vez para toda a instância nas configurações de administração. Aqui você ainda pode usar sua própria chave da OpenAI ou da Anthropic.',
+    'Um endpoint local (Ollama ou LM Studio) é configurado uma única vez para toda a instância nas configurações de administração. Aqui você ainda pode usar sua própria chave da OpenAI ou da Anthropic.',
   'settings.aiParsing.model': 'Modelo',
   'settings.aiParsing.baseUrl': 'URL base',
   'settings.aiParsing.baseUrlHint':

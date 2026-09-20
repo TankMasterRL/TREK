@@ -141,7 +141,7 @@ export interface Settings {
   start_trip_tab?: string
   // AI booking-import fallback (per-user config; used when the admin has not set
   // instance-wide config on the llm_parsing addon). llm_api_key is masked on read.
-  llm_provider?: 'local' | 'openai' | 'anthropic'
+  llm_provider?: 'local' | 'lmstudio' | 'openai' | 'anthropic'
   llm_model?: string
   llm_base_url?: string
   llm_multimodal?: boolean

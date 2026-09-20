@@ -142,7 +142,43 @@ describe('LlmParseService', () => {
     expect(res.kiItems).toEqual([{ '@type': 'LodgingReservation' }]);
     expect(res.warnings).toEqual(['note']);
     expect(extract).not.toHaveBeenCalled();
-    expect(routeExtraction).toHaveBeenCalledWith('Hotel booking', { baseUrl: 'http://ollama:11434/v1', model: 'm', apiKey: 'k' });
+    expect(routeExtraction).toHaveBeenCalledWith('Hotel booking', { baseUrl: 'http://ollama:11434/v1', model: 'm', apiKey: 'k', provider: 'local' });
+  });
+
+  it('routes LM Studio through the same router, telling it which server answers', async () => {
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'lmstudio', baseUrl: 'http://lms:1234/v1' }));
+    extractText.mockResolvedValue('Hotel booking');
+    const res = await svc().parse(file('a.txt'), 1);
+    expect(res.kiItems).toEqual([{ '@type': 'LodgingReservation' }]);
+    expect(extract).not.toHaveBeenCalled();
+    expect(routeExtraction).toHaveBeenCalledWith('Hotel booking', {
+      baseUrl: 'http://lms:1234/v1',
+      model: 'm',
+      apiKey: undefined,
+      provider: 'lmstudio',
+    });
+  });
+
+  it('falls back to each self-hosted server own default port when no base URL is configured', async () => {
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'lmstudio' }));
+    await svc().parse(file('a.txt'), 1);
+    expect(routeExtraction.mock.calls[0][1].baseUrl).toBe('http://localhost:1234/v1');
+
+    vi.clearAllMocks();
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'local' }));
+    extractText.mockResolvedValue('Flight AB123');
+    detectFlightNumbers.mockReturnValue([]);
+    routeExtraction.mockResolvedValue({ kiItems: [], warnings: [] });
+    await svc().parse(file('a.txt'), 1);
+    expect(routeExtraction.mock.calls[0][1].baseUrl).toBe('http://localhost:11434/v1');
+  });
+
+  it('gives LM Studio the self-hosted text cap, not the tight cloud one', async () => {
+    const long = 'x'.repeat(7000);
+    extractText.mockResolvedValue(long);
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'lmstudio' }));
+    await svc().parse(file('hotel.txt'), 1);
+    expect(routeExtraction.mock.calls[0][0]).toHaveLength(6000); // 6k, not the cloud 4k
   });
 
   it('keeps the wide text cap (16k) for a local flight itinerary but tightens it (6k) otherwise', async () => {

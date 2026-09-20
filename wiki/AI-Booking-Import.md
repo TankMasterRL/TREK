@@ -2,7 +2,7 @@
 
 The **AI Parsing** addon adds a large-language-model fallback to TREK's booking import. When [KDE Itinerary](Reservations-and-Bookings#import-from-booking-confirmation) can't read a confirmation — a plain-text email, an unusual PDF layout, a vendor whose format it doesn't recognise — TREK can hand the document to an AI model and turn it into a reservation you review before saving.
 
-It is an **opt-in addon, disabled by default**, and it works with a self-hosted local model, so no booking data has to leave your server.
+It is an **opt-in addon, disabled by default**, and it works with a local model you run yourself — **Ollama** or **LM Studio** — so no booking data has to leave your server.
 
 > **Admin:** Enable **AI Parsing** in [Admin-Addons](Admin-Addons) (it sits in the *Integration* group). Booking import then works even without the `kitinerary-extractor` binary — with no extractor present the model parses every uploaded file instead of only the ones Itinerary can't read. Installing the extractor is still the better setup: structured tickets stay fast and deterministic and the model remains a fallback. Configure a provider and model before pointing anyone at it, though: the **Import from file** button appears as soon as the addon is on, and with neither an extractor nor a configured model the import fails outright. See [Reservations-and-Bookings](Reservations-and-Bookings#import-from-booking-confirmation).
 
@@ -18,15 +18,31 @@ So structured tickets keep being parsed the fast, deterministic way; the AI only
 
 ## Choosing a provider
 
-The addon supports three providers:
+The addon supports four providers:
 
 | Provider | Runs where | Notes |
 |----------|-----------|-------|
-| **Local (Ollama)** | Your own hardware | No booking data leaves your network. Recommended for privacy; works on CPU. |
+| **Local · Ollama** | Your own hardware | No booking data leaves your network. Recommended for privacy; works on CPU. TREK can also download models for you. |
+| **Local · LM Studio** | Your own hardware | Same privacy, same extraction quality. Pick this if LM Studio is what you already run — you add models in LM Studio itself, and TREK lists them. |
 | **OpenAI** | OpenAI's API, or any **OpenAI-compatible** endpoint via a custom base URL | Needs an API key. |
 | **Anthropic** | Anthropic's API | Needs an API key. **Reads PDFs — including scans — natively.** |
 
 > **Scanned PDFs:** Local and OpenAI-compatible models receive the document's *extracted text*. A scanned or image-only PDF has no text layer, so those providers return nothing for it. Only **Anthropic** ingests the raw PDF and can read scans.
+
+### Ollama or LM Studio?
+
+Both are local servers you run yourself, and TREK drives them the same way: **one call per document, with the answer's JSON shape enforced by the server while the model generates it** — so the model cannot return a field of the wrong type or leave a required one out. Ollama does that through its native `format` option, LM Studio through the `json_schema` response format on its OpenAI-compatible API; the extraction quality is the model's, not the server's, so a given model behaves the same on either.
+
+The differences that matter when you pick:
+
+| | Ollama | LM Studio |
+|---|---|---|
+| Default endpoint | `http://localhost:11434/v1` | `http://localhost:1234/v1` |
+| Adding models | TREK can **pull** one for you (see below) | Add it in the LM Studio app, or `lms get <model>` — then **Refresh** in TREK |
+| Model ids | tagged, e.g. `qwen3:8b` | as LM Studio lists them, e.g. `qwen3-8b` |
+| Server must be reachable | yes — start it before importing | yes — LM Studio's **local server** must be running (Developer tab → *Start Server*) |
+
+LM Studio loads a model on demand when its just-in-time loading is on (the default). With it off, load the model in LM Studio first or the request comes back as an error on the parse result.
 
 ## Admin: instance-wide configuration
 
@@ -34,19 +50,21 @@ When you enable the addon, a configuration panel appears directly under it in [A
 
 > *Set instance-wide config (applies to all users). Leave blank to let each user configure their own provider.*
 
-- **Provider** — Local · OpenAI-compatible, OpenAI, or Anthropic.
-- **Base URL** — shown for every provider except Anthropic. Defaults to `http://localhost:11434/v1` for a local Ollama server, or `https://api.openai.com/v1` for OpenAI. Point it at any OpenAI-compatible endpoint here.
+- **Provider** — Local · Ollama, Local · LM Studio, OpenAI, or Anthropic.
+- **Base URL** — shown for every provider except Anthropic. Defaults to `http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio, or `https://api.openai.com/v1` for OpenAI. Point it at any OpenAI-compatible endpoint here.
 - **API key** — optional for a local server (`(often not required)`), required for the cloud providers. Stored **encrypted**; it is shown masked (`••••••••`) once saved, and leaving it unchanged keeps the stored key.
-- **Model** — the model id (e.g. `qwen3:8b`, `gpt-4o`, `claude-opus-4-8`).
+- **Model** — the model id (e.g. `qwen3:8b`, `qwen3-8b`, `gpt-4o`, `claude-opus-4-8`).
 
 If you set a provider and model here, it applies to **all users** and overrides their personal settings. Leave the panel blank to let each user bring their own model (see below).
 
-### Pulling a local model
+### Managing local models
 
-With the **Local** provider selected, the panel manages your Ollama server directly:
+With either local provider selected, the panel talks to that server directly:
 
-- **Installed on the server** lists the models Ollama already has, with a **Refresh** button. Click a model to select it.
-- **Pull a recommended model** downloads a model with a live progress bar. The one recommended model is **Qwen3 — 8B** (`qwen3:8b`) — *best extraction quality & speed on CPU (thinking auto-disabled) · Apache-2.0*. Once the pull finishes it is selected automatically.
+- **Installed on the server** lists the models it already has, with a **Refresh** button. Click a model to select it. (For LM Studio, embedding models are left out — they cannot extract a booking.)
+- **Pull a recommended model** (Ollama only) downloads a model with a live progress bar. The one recommended model is **Qwen3 — 8B** (`qwen3:8b`) — *best extraction quality & speed on CPU (thinking auto-disabled) · Apache-2.0*. Once the pull finishes it is selected automatically.
+
+LM Studio has no download API, so TREK does not offer a Pull for it: add the model in the LM Studio app (or run `lms get <model>`) and press **Refresh**.
 
 You can also select any other model already installed on the server, or type a model id by hand.
 
@@ -56,7 +74,7 @@ If an admin leaves the instance config blank, each user can configure their own 
 
 > *Choose the AI model used to extract bookings from uploaded files. This applies only when your administrator has not configured a model for the whole instance.*
 
-The fields are a **Provider** (only **OpenAI** or **Anthropic** here), a **Model** id, and an **API key** that is *stored encrypted* (leave blank to keep the current key). There is no personal Base URL: the address this server calls is instance configuration, so a local (Ollama) model can only be set up by an admin on the addon, and the server answers 403 to anyone, admins included, who tries to store a personal base URL or a personal `local` provider.
+The fields are a **Provider** (only **OpenAI** or **Anthropic** here), a **Model** id, and an **API key** that is *stored encrypted* (leave blank to keep the current key). There is no personal Base URL: the address this server calls is instance configuration, so a local model — Ollama or LM Studio — can only be set up by an admin on the addon, and the server answers 403 to anyone, admins included, who tries to store a personal base URL or a personal local provider.
 
 There is also a **Send documents as images** toggle. It is stored per user, but extraction currently ignores it: only Anthropic is sent the raw PDF, every other provider always gets the extracted text.
 
@@ -93,7 +111,7 @@ The model is asked to capture the full booking — including **every leg of a mu
 - **No manual migration**, and the addon is configured in the UI. The one environment variable it reads is `LLM_TIMEOUT_MS` (see [Environment-Variables](Environment-Variables)).
 - **Local inference can be slow.** On a CPU-only host a single booking can take tens of seconds to a couple of minutes; TREK allows a model 15 minutes per document by default, which `LLM_TIMEOUT_MS` raises or lowers. Uploads are parsed **one at a time** per user, so several files queue rather than run in parallel.
 - **Parse jobs are kept for about 10 minutes** after they finish. Start the review within that window.
-- **Privacy** — with the Local provider nothing leaves your network. With OpenAI or Anthropic, the document's text (or, for Anthropic, the PDF itself) is sent to that provider for extraction.
+- **Privacy** — with either local provider nothing leaves your network. With OpenAI or Anthropic, the document's text (or, for Anthropic, the PDF itself) is sent to that provider for extraction.
 - **API keys are never returned in plaintext** — they are encrypted at rest and only ever shown masked.
 
 ## Related pages

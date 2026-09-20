@@ -8,7 +8,7 @@ TREK has two SSRF guards, both in `ssrfGuard.ts`. Which one applies depends on t
 
 **The strict guard** (`safeFetch` / `safeFetchFollow`, built on `checkSsrf`) covers most outbound traffic — Immich, Synology Photos, AirTrail, notification webhooks, ntfy, Unsplash, and place lookups. It resolves the hostname to an IP address before allowing the connection and blocks loopback, link-local and private ranges. Only the private ranges open up, and only with `ALLOW_INTERNAL_NETWORK=true`. The two tables below describe this guard.
 
-**The relaxed guard** (`safeFetchAdminConfigured`, also exported as `safeFetchLlm`) covers endpoints that are expected to live on your own network: OIDC (discovery, token, userinfo, JWKS), the LLM providers behind the AI Parsing addon (a local Ollama or any OpenAI-compatible endpoint), and plugin OAuth token exchanges. It deliberately permits loopback and LAN targets, so a model server on `localhost` or an identity provider on your LAN works **without** `ALLOW_INTERNAL_NETWORK`. It still resolves every hostname, re-checks every redirect hop, and always blocks link-local and cloud-metadata addresses (`169.254.0.0/16`, the full `fe80::/10`, and the AWS and Alibaba metadata addresses).
+**The relaxed guard** (`safeFetchAdminConfigured`, also exported as `safeFetchLlm`) covers endpoints that are expected to live on your own network: OIDC (discovery, token, userinfo, JWKS), the LLM providers behind the AI Parsing addon (a local Ollama or LM Studio, or any OpenAI-compatible endpoint), and plugin OAuth token exchanges. It deliberately permits loopback and LAN targets, so a model server on `localhost` or an identity provider on your LAN works **without** `ALLOW_INTERNAL_NETWORK`. It still resolves every hostname, re-checks every redirect hop, and always blocks link-local and cloud-metadata addresses (`169.254.0.0/16`, the full `fe80::/10`, and the AWS and Alibaba metadata addresses).
 
 ## Always blocked (no override possible)
 
@@ -35,13 +35,13 @@ The IPv6 link-local rule here matches the `fe80:` hextet only, which is narrower
 | IPv4-mapped RFC-1918 variants | e.g. `::ffff:10.x`, `::ffff:192.168.x` |
 | `*.local`, `*.internal`, `localhost` hostnames | mDNS / internal DNS suffixes (e.g. Docker service names, LAN hosts) and the literal `localhost` |
 
-The hostname `localhost` is matched at the hostname stage too, but it normally resolves to a loopback address (`127.0.0.1` or `::1`), which the always-blocked loopback rule catches first — so under the strict guard it is blocked no matter how `ALLOW_INTERNAL_NETWORK` is set. On a host that maps `localhost` somewhere else, the hostname rule still applies and it stays blocked unless `ALLOW_INTERNAL_NETWORK=true`. The relaxed guard allows `localhost` outright, which is what makes a local Ollama the supported default for AI Parsing.
+The hostname `localhost` is matched at the hostname stage too, but it normally resolves to a loopback address (`127.0.0.1` or `::1`), which the always-blocked loopback rule catches first — so under the strict guard it is blocked no matter how `ALLOW_INTERNAL_NETWORK` is set. On a host that maps `localhost` somewhere else, the hostname rule still applies and it stays blocked unless `ALLOW_INTERNAL_NETWORK=true`. The relaxed guard allows `localhost` outright, which is what makes a local Ollama or LM Studio the supported default for AI Parsing.
 
 `*.local` and `*.internal` hostnames are permitted when `ALLOW_INTERNAL_NETWORK=true` — the guard still resolves them to an IP and enforces all IP-level rules, so any such hostname that resolves to a loopback or link-local address remains blocked regardless.
 
 ## When to enable
 
-Set `ALLOW_INTERNAL_NETWORK=true` when a service reached through the strict guard — Immich, Synology Photos, AirTrail, or a notification webhook — is hosted on your local network and you need TREK to reach it. You do **not** need it for a local or LAN Ollama, an OpenAI-compatible endpoint, an OIDC provider on your LAN, or plugin OAuth; those go through the relaxed guard and already work. Leave the flag off if only those need internal access, since turning it on widens the surface for every strict-guard integration at once.
+Set `ALLOW_INTERNAL_NETWORK=true` when a service reached through the strict guard — Immich, Synology Photos, AirTrail, or a notification webhook — is hosted on your local network and you need TREK to reach it. You do **not** need it for a local or LAN Ollama or LM Studio, an OpenAI-compatible endpoint, an OIDC provider on your LAN, or plugin OAuth; those go through the relaxed guard and already work. Leave the flag off if only those need internal access, since turning it on widens the surface for every strict-guard integration at once.
 
 See [Environment-Variables](Environment-Variables) for how to set environment variables.
 
