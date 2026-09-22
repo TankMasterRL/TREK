@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // The clients go through safeFetchLlm (SSRF guard: blocks the cloud-metadata
 // range, allows a local/LAN Ollama). Mock it here so the tests never do a real
@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { safeFetchLlmMock } = vi.hoisted(() => ({ safeFetchLlmMock: vi.fn() }));
 vi.mock('../../../../src/utils/ssrfGuard', () => ({ safeFetchLlm: safeFetchLlmMock }));
 
-import { OpenAiCompatibleClient } from '../../../../src/nest/llm-parse/clients/openai-compatible.client';
+import { OpenAiCompatibleClient, UnreadableLlmResponse } from '../../../../src/nest/llm-parse/clients/openai-compatible.client';
 import { AnthropicClient } from '../../../../src/nest/llm-parse/clients/anthropic.client';
 import type { LlmExtractionInput } from '../../../../src/nest/llm-parse/llm-provider.interface';
 import { readEnv } from '../../../../src/app-config';
@@ -437,6 +437,168 @@ describe('AnthropicClient', () => {
     const body = JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string);
     const blocks = body.messages[0].content;
     expect(blocks.some((b: any) => b.type === 'document' && b.source.type === 'base64')).toBe(true);
+  });
+});
+
+/**
+ * The size of the reply is a cap the operator sets (LLM_MAX_TOKENS), not a
+ * literal. The chat-completions schema leaves `max_tokens` /
+ * `max_completion_tokens` optional and unbounded — the real ceiling is the
+ * model's own output budget — so the value has to reach the request, survive the
+ * #1760 spelling swap, and back off when a model says it is too high.
+ */
+describe('OpenAiCompatibleClient — the response token cap (LLM_MAX_TOKENS)', () => {
+  const original = process.env.LLM_MAX_TOKENS;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.LLM_MAX_TOKENS;
+    else process.env.LLM_MAX_TOKENS = original;
+  });
+
+  const bodyOf = (call: number) => JSON.parse((safeFetchLlmMock.mock.calls[call][1] as RequestInit).body as string);
+  const OK = () => jsonResponse({ choices: [{ message: { content: '{"reservations":[{"@type":"FlightReservation"}]}' } }] });
+
+  it('defaults to the built-in 4096 when the variable is unset', async () => {
+    delete process.env.LLM_MAX_TOKENS;
+    mockFetch(() => OK());
+    await new OpenAiCompatibleClient().extract(baseInput);
+    expect(bodyOf(0).max_tokens).toBe(4096);
+  });
+
+  it('sends the configured cap instead, under the one spelling', async () => {
+    process.env.LLM_MAX_TOKENS = '16384';
+    mockFetch(() => OK());
+    await new OpenAiCompatibleClient().extract(baseInput);
+    expect(bodyOf(0).max_tokens).toBe(16_384);
+    expect(bodyOf(0).max_completion_tokens).toBeUndefined();
+  });
+
+  it('carries the configured cap across the max_completion_tokens swap (#1760)', async () => {
+    process.env.LLM_MAX_TOKENS = '16384';
+    safeFetchLlmMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } },
+          false,
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(OK());
+    await new OpenAiCompatibleClient().extract(baseInput);
+    // That 400 names the parameter but says nothing about its size — a cap the
+    // operator raised on purpose must not be quietly lowered on the way through.
+    expect(bodyOf(1).max_completion_tokens).toBe(16_384);
+    expect(bodyOf(1).max_tokens).toBeUndefined();
+  });
+
+  it('falls back to 4096 when the model refuses the raised cap', async () => {
+    process.env.LLM_MAX_TOKENS = '100000';
+    safeFetchLlmMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { message: 'max_tokens is too large: 100000. This model supports at most 16384 completion tokens.' } },
+          false,
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(OK());
+    const out = await new OpenAiCompatibleClient().extract(baseInput);
+    expect(out).toEqual([{ '@type': 'FlightReservation' }]);
+    expect(safeFetchLlmMock).toHaveBeenCalledTimes(2);
+    expect(bodyOf(0).max_tokens).toBe(100_000);
+    // Only the cap moves; the retry is otherwise the same request.
+    expect(bodyOf(1).max_tokens).toBe(4096);
+    expect(bodyOf(1).response_format.type).toBe('json_schema');
+    expect(bodyOf(1).temperature).toBe(0);
+  });
+
+  it('reads a context-length complaint the same way (vLLM / llama.cpp wording)', async () => {
+    process.env.LLM_MAX_TOKENS = '32000';
+    safeFetchLlmMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              message:
+                "This model's maximum context length is 8192 tokens. However, you requested 34000 tokens (2000 in the messages, 32000 in the completion). Please reduce the length of the messages or completion.",
+            },
+          },
+          false,
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(OK());
+    await new OpenAiCompatibleClient().extract(baseInput);
+    expect(bodyOf(1).max_tokens).toBe(4096);
+  });
+
+  it('does not buy an identical retry when the cap is already the default', async () => {
+    delete process.env.LLM_MAX_TOKENS;
+    safeFetchLlmMock
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'max_tokens is too large' } }, false, 400))
+      .mockResolvedValueOnce(OK());
+    await new OpenAiCompatibleClient().extract(baseInput);
+    expect(safeFetchLlmMock).toHaveBeenCalledTimes(2);
+    // Nothing left to lower, so this is the ordinary unspecific-400 path.
+    expect(bodyOf(1).max_tokens).toBe(4096);
+    expect(bodyOf(1).response_format.type).toBe('json_object');
+  });
+});
+
+/**
+ * A reply the cap cut short parses to nothing, and used to surface as an import
+ * that simply found no reservations. `finish_reason: 'length'` is the API saying
+ * exactly that happened, so say it rather than leaving the operator guessing.
+ */
+describe('OpenAiCompatibleClient — a truncated reply (finish_reason: length)', () => {
+  it('explains the cap when nothing survived the truncation', async () => {
+    // The fragment breaks off mid-object, so readAnswer sees it as unreadable
+    // (#2375) — but the cap is the cause, and the cap is what gets named.
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[{"@ty' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/LLM_MAX_TOKENS/);
+  });
+
+  it('raises it as UnreadableLlmResponse, so both callers keep their #2375 handling', async () => {
+    // A truncated answer is still one nobody could read. The booking import
+    // warns on the file either way; the plugin surface swallows exactly this
+    // type, so a different one would turn a cut-off reply into a HOST_ERROR
+    // for plugins that have always seen an empty answer.
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[{"@ty' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(UnreadableLlmResponse);
+
+    // Same type for the readable-but-empty half, so the two branches cannot
+    // drift into telling an operator different things about the same cause.
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[]}' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(UnreadableLlmResponse);
+  });
+
+  it('keeps what did parse, rather than discarding a partial answer', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockFetch(() =>
+      jsonResponse({
+        choices: [{ finish_reason: 'length', message: { content: '{"reservations":[{"@type":"FlightReservation"}]}' } }],
+      }),
+    );
+    expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([{ '@type': 'FlightReservation' }]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('leaves a document that genuinely holds no booking alone (finish_reason stop, or absent)', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: '{"reservations":[]}' } }] }));
+    expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '{"reservations":[]}' } }] }));
+    expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
+  });
+
+  it('leaves #2375 its own diagnosis when the reply was not truncated', async () => {
+    // The boundary between the two: prose from a model that ran to a natural
+    // stop is #2375's case, and blaming the cap for it would send an operator
+    // after the wrong setting.
+    mockFetch(() =>
+      jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'I could not find a booking.' } }] }),
+    );
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/did not answer with JSON/);
   });
 });
 

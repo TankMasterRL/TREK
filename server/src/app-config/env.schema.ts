@@ -123,6 +123,15 @@ export const envSchema = z.object({
   // 2^31-1 makes Node clamp the delay to 1 ms and do the same. Both refuse at
   // boot rather than degrading into a timeout of zero.
   LLM_TIMEOUT_MS: integer(1, 2_147_483_647, 'must be a whole number of milliseconds between 1 and 2147483647'),
+  // A whole number of tokens: the chat-completions schema types both spellings
+  // of the cap (`max_tokens`, `max_completion_tokens`) as `integer`, so a
+  // fractional or zero value is not something the API can be asked for. Zero in
+  // particular would be accepted by a plain "positive number" check and come
+  // back as an empty, length-truncated completion on every document. The upper
+  // bound is only a sanity rail — the real ceiling is the model's own output
+  // budget, which no static schema can know, so a value above it is caught at
+  // request time instead (see llm-parse/clients/openai-compatible.client.ts).
+  LLM_MAX_TOKENS: integer(1, 1_000_000, 'must be a whole number of tokens between 1 and 1000000'),
   KITINERARY_EXTRACTOR_PATH: anyString,
   // The OS search path. Not configuration anybody sets for TREK — it is here so
   // the kitinerary probe can resolve its binary to an absolute path itself

@@ -90,8 +90,9 @@ The model is asked to capture the full booking — including **every leg of a mu
 
 ## Good to know
 
-- **No manual migration**, and the addon is configured in the UI. The one environment variable it reads is `LLM_TIMEOUT_MS` (see [Environment-Variables](Environment-Variables)).
+- **No manual migration**, and the addon is configured in the UI. The two environment variables it reads are `LLM_TIMEOUT_MS` and `LLM_MAX_TOKENS` (see [Environment-Variables](Environment-Variables)).
 - **Local inference can be slow.** On a CPU-only host a single booking can take tens of seconds to a couple of minutes; TREK allows a model 15 minutes per document by default, which `LLM_TIMEOUT_MS` raises or lowers. Uploads are parsed **one at a time** per user, so several files queue rather than run in parallel.
+- **A long document can outgrow the reply budget.** OpenAI and the other OpenAI-compatible providers are asked for at most 4096 tokens per answer, which is ample for a normal booking but can be too little for a multi-leg itinerary with many reservations. When the model's answer is cut off the import finds fewer reservations than the document holds — or none at all — and says so in the server log and in the warning on the parse result. Raise `LLM_MAX_TOKENS` in that case: it is an upper bound, so a larger value costs nothing until a document actually needs the room. If you set it higher than the model allows, the request quietly falls back to 4096 rather than failing.
 - **Parse jobs are kept for about 10 minutes** after they finish. Start the review within that window.
 - **Privacy** — with the Local provider nothing leaves your network. With OpenAI or Anthropic, the document's text (or, for Anthropic, the PDF itself) is sent to that provider for extraction.
 - **API keys are never returned in plaintext** — they are encrypted at rest and only ever shown masked.
