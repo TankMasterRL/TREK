@@ -39,18 +39,38 @@ export class LlmConfigResolver {
     return this.readInstanceConfig() ?? this.readUserConfig(userId);
   }
 
-  private readInstanceConfig(): ResolvedLlmConfig | null {
+  /**
+   * The admin's stored API key for the instance config, decrypted.
+   *
+   * Separate from resolve() because the admin management routes need it BEFORE
+   * there is a resolvable config: the panel lists a self-hosted server's models
+   * so the admin can pick one, so the model field is still empty at that point
+   * and readInstanceConfig() answers null. A v1 LM Studio can be configured to
+   * require a token (`Authorization: Bearer`), and it refuses the model list
+   * without one — so the key is read on its own rather than inferred from a
+   * config that is not finished yet.
+   */
+  instanceApiKey(): string | undefined {
+    return decryptLlmApiKey(this.readInstanceConfigBlob()?.apiKey);
+  }
+
+  /** The `llm_parsing` addon's stored config JSON, or null when unset/unparseable. */
+  private readInstanceConfigBlob(): Record<string, unknown> | null {
     const row = this.dbService.get<{ config?: string } | undefined>(
       'SELECT config FROM addons WHERE id = ?',
       ADDON_IDS.LLM_PARSING,
     );
     if (!row?.config) return null;
-    let cfg: Record<string, unknown>;
     try {
-      cfg = JSON.parse(row.config || '{}');
+      return JSON.parse(row.config || '{}');
     } catch {
       return null;
     }
+  }
+
+  private readInstanceConfig(): ResolvedLlmConfig | null {
+    const cfg = this.readInstanceConfigBlob();
+    if (!cfg) return null;
     const provider = asProvider(cfg.provider);
     const model = typeof cfg.model === 'string' ? cfg.model.trim() : '';
     if (!provider || !model) return null;

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useLlmParsingConfig } from './useLlmParsingConfig'
-import { LLM_PROVIDER_META, personalLlmProvider } from './llmProviders'
+import { LLM_PROVIDER_META, personalLlmProvider, recommendedModelsFor } from './llmProviders'
 
 const { llmLocalModels, llmLocalPull, updateAddon, toastSuccess, toastError } = vi.hoisted(() => ({
   llmLocalModels: vi.fn(),
@@ -33,9 +33,8 @@ describe('LLM_PROVIDER_META', () => {
     expect(LLM_PROVIDER_META.map(m => m.value)).toEqual(['local', 'lmstudio', 'openai', 'anthropic'])
   })
 
-  it('marks exactly the two local servers as self-hosted, and only Ollama as pullable', () => {
+  it('marks exactly the two local servers as self-hosted', () => {
     expect(LLM_PROVIDER_META.filter(m => m.selfHosted).map(m => m.value)).toEqual(['local', 'lmstudio'])
-    expect(LLM_PROVIDER_META.filter(m => m.canPull).map(m => m.value)).toEqual(['local'])
   })
 
   it('gives each local server its own default port', () => {
@@ -44,6 +43,20 @@ describe('LLM_PROVIDER_META', () => {
     expect(byValue.lmstudio).toBe('http://localhost:1234/v1')
     // Anthropic has no endpoint to name, so its Base URL field never appears.
     expect(byValue.anthropic).toBeUndefined()
+  })
+})
+
+describe('recommendedModelsFor', () => {
+  it('names the same model the way each server does', () => {
+    // Ollama downloads by tag, LM Studio by catalog identifier. Handing one server the
+    // other's spelling is a download that fails, so the id is per provider.
+    expect(recommendedModelsFor('local').map(m => m.id)).toEqual(['qwen3.5:4b'])
+    expect(recommendedModelsFor('lmstudio').map(m => m.id)).toEqual(['qwen/qwen3.5-4b'])
+  })
+
+  it('offers nothing to a provider that downloads nothing', () => {
+    expect(recommendedModelsFor('openai')).toEqual([])
+    expect(recommendedModelsFor('anthropic')).toEqual([])
   })
 })
 
@@ -83,13 +96,25 @@ describe('useLlmParsingConfig', () => {
     expect(result.current.installed).toEqual([])
   })
 
-  it('passes the provider to a pull, so the server can refuse where there is no download API', async () => {
+  it('passes the provider to a pull, so the server downloads from the right one', async () => {
     const { result } = renderHook(() => useLlmParsingConfig(addon({ provider: 'local' })))
     await waitFor(() => expect(result.current.installed).toEqual(['qwen3-8b']))
 
     await act(async () => { await result.current.pull('qwen3:8b') })
     expect(llmLocalPull).toHaveBeenCalledWith('http://localhost:11434/v1', 'qwen3:8b', expect.any(Function), 'local')
     expect(result.current.model).toBe('qwen3:8b')
+  })
+
+  it('offers each self-hosted server the id IT downloads by', async () => {
+    const ollama = renderHook(() => useLlmParsingConfig(addon({ provider: 'local' })))
+    await waitFor(() => expect(ollama.result.current.recommended.map(m => m.id)).toEqual(['qwen3.5:4b']))
+
+    const lmStudio = renderHook(() => useLlmParsingConfig(addon({ provider: 'lmstudio' })))
+    await waitFor(() => expect(lmStudio.result.current.recommended.map(m => m.id)).toEqual(['qwen/qwen3.5-4b']))
+
+    // LM Studio downloads through its v1 API now, so its panel offers a pull too.
+    await act(async () => { await lmStudio.result.current.pull('qwen/qwen3.5-4b') })
+    expect(llmLocalPull).toHaveBeenCalledWith('http://localhost:1234/v1', 'qwen/qwen3.5-4b', expect.any(Function), 'lmstudio')
   })
 
   it('trims the model and keeps the endpoint of a provider that has one', async () => {

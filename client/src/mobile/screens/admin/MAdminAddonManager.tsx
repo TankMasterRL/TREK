@@ -14,7 +14,7 @@ import { DOCUMENT_PROVIDER_ICONS } from '../../../components/shared/DocumentProv
 import MToggle from '../../components/MToggle'
 import { MAdminButton, MAdminCard, MAdminField, MAdminInput, MAdminSecretInput } from './MAdminUi'
 import { useLlmParsingConfig } from '../../../components/Admin/useLlmParsingConfig'
-import { LLM_MASKED, LLM_PROVIDER_META, RECOMMENDED_MODELS } from '../../../components/Admin/llmProviders'
+import { LLM_MASKED, LLM_PROVIDER_META } from '../../../components/Admin/llmProviders'
 
 const ICON_MAP = {
   ListChecks, Wallet, FileText, CalendarDays, Puzzle, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, Plane, Bookmark,
@@ -480,9 +480,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
             </div>
             {c.modelsErr && <p className="font-geist text-[0.6875rem] text-[color:var(--m-st-danger)]">{c.modelsErr}</p>}
             {!c.modelsErr && c.installed.length === 0 && !c.loadingModels && (
-              <p className="font-geist text-[0.6875rem] text-m-faint">
-                {c.meta.canPull ? 'No models installed yet — pull one below.' : 'No models found — add one in LM Studio, then refresh.'}
-              </p>
+              <p className="font-geist text-[0.6875rem] text-m-faint">No models installed yet — pull one below.</p>
             )}
             {c.installed.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -502,60 +500,53 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
               </div>
             )}
 
-            {c.meta.canPull && (
-              <div className="border-t border-[color:var(--m-rowbr)] pt-3">
-                <div className="mb-2 text-[0.75rem] font-semibold text-m-ink">Pull a recommended model</div>
-                <div className="space-y-1">
-                  {RECOMMENDED_MODELS.map(m => {
-                    const installedHere = c.isInstalled(m.id)
-                    const isPulling = c.pulling === m.id
-                    const active = c.model === m.id
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
-                          active ? 'border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)]' : 'border-transparent'
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[0.8125rem] text-m-ink">{m.label}</span>
-                            {m.recommended && (
-                              <span className="rounded-md bg-[color:color-mix(in_srgb,var(--m-st-confirmed)_15%,transparent)] px-1.5 py-px font-geist text-[0.5625rem] font-bold text-[color:var(--m-st-confirmed)]">
-                                Recommended
-                              </span>
-                            )}
-                          </div>
-                          <div className="font-geist text-[0.625rem] leading-relaxed text-m-faint">{m.note}</div>
-                          {isPulling && (
-                            <div className="mt-1.5">
-                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--m-ic)]">
-                                <div className="h-full bg-m-act transition-[width] duration-200" style={{ width: `${c.pullPct}%` }} />
-                              </div>
-                              <div className="mt-0.5 font-geist text-[0.5625rem] text-m-faint">{c.pullStatus}{c.pullPct ? ` · ${c.pullPct}%` : ''}</div>
-                            </div>
+            <div className="border-t border-[color:var(--m-rowbr)] pt-3">
+              <div className="mb-2 text-[0.75rem] font-semibold text-m-ink">Pull a recommended model</div>
+              <div className="space-y-1">
+                {c.recommended.map(m => {
+                  const installedHere = c.isInstalled(m.id)
+                  const isPulling = c.pulling === m.id
+                  const active = c.model === m.id
+                  return (
+                    <div
+                      key={m.id}
+                      className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
+                        active ? 'border-[color:var(--m-rowbr)] bg-[color:var(--m-sheetop)]' : 'border-transparent'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[0.8125rem] text-m-ink">{m.label}</span>
+                          {m.recommended && (
+                            <span className="rounded-md bg-[color:color-mix(in_srgb,var(--m-st-confirmed)_15%,transparent)] px-1.5 py-px font-geist text-[0.5625rem] font-bold text-[color:var(--m-st-confirmed)]">
+                              Recommended
+                            </span>
                           )}
                         </div>
-                        {installedHere ? (
-                          <MAdminButton variant="ghost" disabled={active} onClick={() => c.setModel(m.id)}>
-                            {active ? 'Selected' : 'Use'}
-                          </MAdminButton>
-                        ) : (
-                          <MAdminButton busy={isPulling} disabled={!!c.pulling} onClick={() => c.pull(m.id)}>
-                            {isPulling ? 'Pulling…' : 'Pull'}
-                          </MAdminButton>
+                        <div className="font-geist text-[0.625rem] leading-relaxed text-m-faint">{m.note}</div>
+                        {isPulling && (
+                          <div className="mt-1.5">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--m-ic)]">
+                              <div className="h-full bg-m-act transition-[width] duration-200" style={{ width: `${c.pullPct}%` }} />
+                            </div>
+                            <div className="mt-0.5 font-geist text-[0.5625rem] text-m-faint">{c.pullStatus}{c.pullPct ? ` · ${c.pullPct}%` : ''}</div>
+                          </div>
                         )}
                       </div>
-                    )
-                  })}
-                </div>
+                      {installedHere ? (
+                        <MAdminButton variant="ghost" disabled={active} onClick={() => c.setModel(m.id)}>
+                          {active ? 'Selected' : 'Use'}
+                        </MAdminButton>
+                      ) : (
+                        <MAdminButton busy={isPulling} disabled={!!c.pulling} onClick={() => c.pull(m.id)}>
+                          {isPulling ? 'Pulling…' : 'Pull'}
+                        </MAdminButton>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-            )}
-            {!c.meta.canPull && (
-              <p className="font-geist text-[0.6875rem] leading-relaxed text-m-faint">
-                LM Studio downloads models in its own app (or with <code>lms get &lt;model&gt;</code>). TREK lists what is already there.
-              </p>
-            )}
+            </div>
           </div>
         )}
       </section>

@@ -14,9 +14,20 @@
  * `temperature` as 400s come back. Here the server is known, one request is enough, and
  * the router's contract (one call per document, a schema that is actually enforced) holds.
  *
- * LM Studio also exposes a native `/api/v0/chat/completions` with the same request shape
- * plus load/runtime stats in the response. Extraction needs none of those stats, and the
- * `/v1` path is the one LM Studio documents as stable, so that is the one used here.
+ * ## Why not the native v1 REST API
+ *
+ * LM Studio 0.4.0 released a native REST API at `/api/v1/*`, and the model management
+ * next door (llm-local.service.ts) is written against it. Inference is the one place
+ * that stays on the OpenAI-compatible path, for a reason that is not stylistic:
+ * **`POST /api/v1/chat` has no `response_format`**. Its documented body is
+ * `model` / `input` / `system_prompt` / `integrations` / sampling knobs / `reasoning` /
+ * `context_length` / `store`, and nothing in it constrains the shape of the answer. Its
+ * own strengths — stateful threads, MCP integrations, load progress events — are things
+ * one-shot extraction has no use for, and it would cost the guarantee the whole router
+ * is built on: asking a model for JSON is not the same as the server refusing to emit
+ * anything else. `/v1/chat/completions` is where LM Studio applies a schema, so that is
+ * where extraction runs, and this comment is here so the next reader does not "finish"
+ * the migration by moving it.
  */
 
 import { postEnforced, toOpenAiBase, type EnforcedExtractInput } from './enforced';

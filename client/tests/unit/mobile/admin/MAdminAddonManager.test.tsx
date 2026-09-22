@@ -673,7 +673,7 @@ describe('MAdminAddonManager', () => {
     await user.type(screen.getByDisplayValue('sk-secret'), '-rotated');
     expect(screen.getByDisplayValue('sk-secret-rotated')).toBeInTheDocument();
   });
-  it('FE-MOB-AADD-033: LM Studio queries its own server and offers no Pull', async () => {
+  it('FE-MOB-AADD-033: LM Studio queries and downloads from its own server', async () => {
     const user = userEvent.setup();
     const urls: (string | null)[] = [];
     const providers: (string | null)[] = [];
@@ -688,6 +688,10 @@ describe('MAdminAddonManager', () => {
     await waitFor(() => expect(providers).toEqual(['local', 'lmstudio']));
     expect(urls[1]).toBe('http://localhost:1234/v1');
     expect(screen.getByPlaceholderText('http://localhost:1234/v1')).toBeInTheDocument();
-    expect(screen.queryByText('Pull a recommended model')).not.toBeInTheDocument();
+
+    // LM Studio downloads through its v1 API, so the Pull section stays — offering the
+    // model under the catalog id LM Studio downloads it by, not Ollama's tag.
+    expect(screen.getByText('Pull a recommended model')).toBeInTheDocument();
+    expect(screen.getByText('Qwen3.5 — 4B')).toBeInTheDocument();
   });
 });

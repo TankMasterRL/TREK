@@ -24,10 +24,13 @@ export interface LlmProviderMeta {
   defaultBaseUrl?: string
   /** Placeholder for the Model field — a real model id for that provider. */
   modelPlaceholder: string
-  /** Whether this provider names a server the operator runs (model list, optional key). */
+  /**
+   * Whether this provider names a server the operator runs. Such a server lists the
+   * models it has and downloads new ones on request, so this one flag gates the whole
+   * model-management block — Ollama through `/api/pull`, LM Studio through its native
+   * v1 REST API. It also decides whether the API-key field is optional.
+   */
   selfHosted: boolean
-  /** Whether the server can download a model on request (Ollama can; LM Studio cannot). */
-  canPull: boolean
 }
 
 export const LLM_PROVIDER_META: LlmProviderMeta[] = [
@@ -38,18 +41,14 @@ export const LLM_PROVIDER_META: LlmProviderMeta[] = [
     defaultBaseUrl: 'http://localhost:11434/v1',
     modelPlaceholder: 'select or pull below',
     selfHosted: true,
-    canPull: true,
   },
   {
     value: 'lmstudio',
     label: 'Local · LM Studio',
     badge: 'LM Studio',
     defaultBaseUrl: 'http://localhost:1234/v1',
-    modelPlaceholder: 'select below',
+    modelPlaceholder: 'select or pull below',
     selfHosted: true,
-    // LM Studio downloads models in its own app / via `lms get`; its REST API has
-    // no download endpoint, so the panel lists what is there and offers no Pull.
-    canPull: false,
   },
   {
     value: 'openai',
@@ -57,23 +56,49 @@ export const LLM_PROVIDER_META: LlmProviderMeta[] = [
     defaultBaseUrl: 'https://api.openai.com/v1',
     modelPlaceholder: 'gpt-4o',
     selfHosted: false,
-    canPull: false,
   },
   {
     value: 'anthropic',
     label: 'Anthropic',
     modelPlaceholder: 'claude-opus-4-8',
     selfHosted: false,
-    canPull: false,
   },
 ]
 
-/** Curated models the local extractor is tuned for, pullable via Ollama. The router drives
- *  one model per document via the server's schema-enforced sampling; "thinking" is disabled
- *  automatically, so the Qwen3 family works without any tuning. A host only needs one. */
-export const RECOMMENDED_MODELS: { id: string; label: string; note: string; recommended: boolean; vision: boolean }[] = [
-  { id: 'qwen3.5:4b', label: 'Qwen3.5 — 4B', note: 'Recommended · small and quick on CPU, 3.4 GB download, 256K context (thinking auto-disabled) · Apache-2.0', recommended: true, vision: true },
+/**
+ * Curated models the local extractor is tuned for, downloadable on either self-hosted
+ * server. The router drives one model per document via the server's schema-enforced
+ * sampling; "thinking" is disabled automatically, so the Qwen3 family works without any
+ * tuning. A host only needs one.
+ *
+ * The id is per server because the two name the same weights differently: Ollama uses a
+ * tag (`qwen3.5:4b`), LM Studio a catalog identifier (`qwen/qwen3.5-4b`), and each only
+ * downloads the spelling it knows. One row per model with an id per server keeps that a
+ * lookup rather than a second list to keep in step.
+ */
+export interface RecommendedModel {
+  /** Model id per provider value, as that server lists and downloads it. */
+  ids: Record<string, string>
+  label: string
+  note: string
+  recommended: boolean
+  vision: boolean
+}
+
+export const RECOMMENDED_MODELS: RecommendedModel[] = [
+  {
+    ids: { local: 'qwen3.5:4b', lmstudio: 'qwen/qwen3.5-4b' },
+    label: 'Qwen3.5 — 4B',
+    note: 'Recommended · small and quick on CPU, 3.4 GB download, 256K context (thinking auto-disabled) · Apache-2.0',
+    recommended: true,
+    vision: true,
+  },
 ]
+
+/** One flat row per recommended model the given server knows, carrying ITS id for it. */
+export function recommendedModelsFor(provider: string): (Omit<RecommendedModel, 'ids'> & { id: string })[] {
+  return RECOMMENDED_MODELS.flatMap(({ ids, ...rest }) => (ids[provider] ? [{ ...rest, id: ids[provider] }] : []))
+}
 
 /**
  * What the per-user AI-parsing form shows for a stored provider.

@@ -621,8 +621,9 @@ export const adminApi = {
    */
   llmLocalModels: (baseUrl: string, provider?: string): Promise<{ models: { name: string; size: number }[] }> =>
     apiClient.get('/admin/llm/local/models', { params: { baseUrl, provider } }).then(r => r.data),
-  /** Pull a model, streaming Ollama's NDJSON progress to `onProgress`. Ollama only —
-   *  LM Studio has no download API and the server answers 400 for it. */
+  /** Download a model, streaming NDJSON progress lines to `onProgress`. Both self-hosted
+   *  servers report through the same lines — Ollama streams them itself, and the server
+   *  translates LM Studio's v1 download job into them. */
   llmLocalPull: async (
     baseUrl: string,
     model: string,

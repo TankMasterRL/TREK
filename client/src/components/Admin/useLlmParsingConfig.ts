@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { adminApi } from '../../api/client'
 import { useToast } from '../shared/Toast'
-import { LLM_PROVIDER_META } from './llmProviders'
+import { LLM_PROVIDER_META, recommendedModelsFor } from './llmProviders'
 
 const FALLBACK_META = LLM_PROVIDER_META[0]
 
@@ -17,10 +17,10 @@ export interface LlmParsingConfigAddon {
  * personal config (see the server's llm-config.resolver.ts).
  *
  * The API key is masked on read; the mask is sent back unchanged so the server keeps
- * the stored key. For a self-hosted provider the hook also lists the models installed
- * on that server — Ollama through `/api/tags`, LM Studio through `/api/v0/models`,
- * both behind the admin route, which takes the provider so it knows which to ask —
- * and pulls a recommended model where the server supports downloading one.
+ * the stored key. For a self-hosted provider the hook also lists the models installed on
+ * that server and downloads a recommended one — Ollama through `/api/tags` + `/api/pull`,
+ * LM Studio through its native v1 REST API — both behind the admin route, which takes the
+ * provider so it knows which server to ask and which id spelling that one downloads by.
  */
 export function useLlmParsingConfig(addon: LlmParsingConfigAddon) {
   const toast = useToast()
@@ -41,6 +41,9 @@ export function useLlmParsingConfig(addon: LlmParsingConfigAddon) {
 
   const meta = LLM_PROVIDER_META.find(p => p.value === provider) ?? FALLBACK_META
   const effectiveUrl = baseUrl.trim() || meta.defaultBaseUrl || ''
+  // Resolved here rather than in each shell: the two servers spell the same model
+  // differently, and that lookup is logic, so both shells render one ready-made list.
+  const recommended = useMemo(() => recommendedModelsFor(meta.value), [meta.value])
   const isInstalled = (id: string) => installed.some(n => n === id || n.startsWith(id + ':') || n.startsWith(id))
 
   const loadModels = useCallback(async () => {
@@ -121,6 +124,6 @@ export function useLlmParsingConfig(addon: LlmParsingConfigAddon) {
     meta,
     saving, save,
     installed, isInstalled, modelsErr, loadingModels, loadModels,
-    pulling, pullPct, pullStatus, pull,
+    recommended, pulling, pullPct, pullStatus, pull,
   }
 }

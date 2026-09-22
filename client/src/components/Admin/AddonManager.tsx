@@ -13,7 +13,7 @@ import { DOCUMENT_PROVIDER_ICONS } from '../shared/DocumentProviderIcons'
 import AddonTile from './AddonTile'
 import AddonSubRow from './AddonSubRow'
 import { useLlmParsingConfig } from './useLlmParsingConfig'
-import { LLM_MASKED, LLM_PROVIDER_META, RECOMMENDED_MODELS } from './llmProviders'
+import { LLM_MASKED, LLM_PROVIDER_META } from './llmProviders'
 
 // Keys are the `icon` column from the addons table (see server seeds.ts); anything
 // unknown falls back to Puzzle. Users/Sparkles cover collab and llm_parsing, which
@@ -415,9 +415,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
           </div>
           {c.modelsErr && <p className="text-caption text-danger">{c.modelsErr}</p>}
           {!c.modelsErr && c.installed.length === 0 && !c.loadingModels && (
-            <p className="text-caption text-content-faint">
-              {c.meta.canPull ? 'No models installed yet — pull one below.' : 'No models found — add one in LM Studio, then refresh.'}
-            </p>
+            <p className="text-caption text-content-faint">No models installed yet — pull one below.</p>
           )}
           {c.installed.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -434,50 +432,43 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
             </div>
           )}
 
-          {c.meta.canPull && (
-            <div className="border-t border-edge-secondary pt-2">
-              <div className="mb-1.5 text-caption font-medium text-content-secondary">Pull a recommended model</div>
-              <div className="space-y-1">
-                {RECOMMENDED_MODELS.map(m => {
-                  const installedHere = c.isInstalled(m.id)
-                  const isPulling = c.pulling === m.id
-                  const active = c.model === m.id
-                  return (
-                    <div key={m.id} className="min-w-0" title={m.note}>
-                      <div className="flex items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate text-caption text-content">{m.label}</span>
-                        {m.recommended && (
-                          <span className="shrink-0 rounded-md bg-success-soft px-1.5 py-px text-caption font-semibold text-success">Recommended</span>
-                        )}
-                        {installedHere ? (
-                          <button type="button" onClick={() => c.setModel(m.id)} disabled={active} className={`shrink-0 rounded-md px-2 py-1 text-caption font-medium transition-colors ${active ? 'bg-surface-tertiary text-content-muted' : 'border border-edge-secondary text-content-secondary hover:border-edge'}`}>
-                            {active ? 'Selected' : 'Use'}
-                          </button>
-                        ) : (
-                          <button type="button" onClick={() => c.pull(m.id)} disabled={!!c.pulling} className="shrink-0 rounded-md bg-accent px-2 py-1 text-caption font-medium text-accent-text disabled:opacity-60">
-                            {isPulling ? 'Pulling…' : 'Pull'}
-                          </button>
-                        )}
-                      </div>
-                      {isPulling && (
-                        <div className="mt-1">
-                          <div className="h-1 w-full overflow-hidden rounded-full bg-surface-tertiary">
-                            <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${c.pullPct}%` }} />
-                          </div>
-                          <div className="mt-0.5 text-caption text-content-faint">{c.pullStatus}{c.pullPct ? ` · ${c.pullPct}%` : ''}</div>
-                        </div>
+          <div className="border-t border-edge-secondary pt-2">
+            <div className="mb-1.5 text-caption font-medium text-content-secondary">Pull a recommended model</div>
+            <div className="space-y-1">
+              {c.recommended.map(m => {
+                const installedHere = c.isInstalled(m.id)
+                const isPulling = c.pulling === m.id
+                const active = c.model === m.id
+                return (
+                  <div key={m.id} className="min-w-0" title={m.note}>
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-caption text-content">{m.label}</span>
+                      {m.recommended && (
+                        <span className="shrink-0 rounded-md bg-success-soft px-1.5 py-px text-caption font-semibold text-success">Recommended</span>
+                      )}
+                      {installedHere ? (
+                        <button type="button" onClick={() => c.setModel(m.id)} disabled={active} className={`shrink-0 rounded-md px-2 py-1 text-caption font-medium transition-colors ${active ? 'bg-surface-tertiary text-content-muted' : 'border border-edge-secondary text-content-secondary hover:border-edge'}`}>
+                          {active ? 'Selected' : 'Use'}
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => c.pull(m.id)} disabled={!!c.pulling} className="shrink-0 rounded-md bg-accent px-2 py-1 text-caption font-medium text-accent-text disabled:opacity-60">
+                          {isPulling ? 'Pulling…' : 'Pull'}
+                        </button>
                       )}
                     </div>
-                  )
-                })}
-              </div>
+                    {isPulling && (
+                      <div className="mt-1">
+                        <div className="h-1 w-full overflow-hidden rounded-full bg-surface-tertiary">
+                          <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${c.pullPct}%` }} />
+                        </div>
+                        <div className="mt-0.5 text-caption text-content-faint">{c.pullStatus}{c.pullPct ? ` · ${c.pullPct}%` : ''}</div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )}
-          {!c.meta.canPull && (
-            <p className="text-caption text-content-faint">
-              LM Studio downloads models in its own app (or with <code>lms get &lt;model&gt;</code>). TREK lists what is already there.
-            </p>
-          )}
+          </div>
         </div>
       )}
 

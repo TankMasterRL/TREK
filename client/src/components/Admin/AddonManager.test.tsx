@@ -792,7 +792,7 @@ describe('AddonManager', () => {
     expect(screen.queryByText('Pulling…')).not.toBeInTheDocument();
   });
 
-  it('FE-ADMIN-ADDON-038: LM Studio lists its own models, offers no Pull, and saves its own endpoint', async () => {
+  it('FE-ADMIN-ADDON-038: LM Studio lists its own models, offers a Pull, and saves its own endpoint', async () => {
     const user = userEvent.setup();
     const urls: (string | null)[] = [];
     const providers: (string | null)[] = [];
@@ -813,10 +813,11 @@ describe('AddonManager', () => {
     await waitFor(() => expect(urls).toEqual(['http://localhost:1234/v1']));
     expect(providers).toEqual(['lmstudio']);
 
-    // A model list, but no Pull: LM Studio downloads models in its own app.
+    // A model list AND a Pull: LM Studio's native v1 REST API downloads models, so the
+    // panel offers the recommended one under the id LM Studio downloads it by.
     await user.click(await screen.findByRole('button', { name: 'qwen3-8b' }));
-    expect(screen.queryByRole('button', { name: 'Pull' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Pull a recommended model')).not.toBeInTheDocument();
+    expect(screen.getByText('Pull a recommended model')).toBeInTheDocument();
+    expect(screen.getByTitle(/Recommended/).textContent).toContain('Qwen3.5 — 4B');
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByText('Saved');

@@ -7,8 +7,8 @@ import { LlmLocalPullDto } from './llm-local.dto';
 import { ManagedForbidden } from '../common/managed';
 
 /**
- * Admin-only management of a self-hosted LLM server: list installed models, and pull
- * new ones where the server has an API for it. Used by the AI-parsing addon config UI.
+ * Admin-only management of a self-hosted LLM server: list installed models and download
+ * new ones. Used by the AI-parsing addon config UI.
  *
  * `provider` selects which server is being managed ('local' = Ollama, 'lmstudio' =
  * LM Studio). It is optional and defaults to Ollama, so a client that predates LM
@@ -26,12 +26,15 @@ export class LlmLocalController {
   }
 
   /**
-   * Stream a model pull. Proxies Ollama's NDJSON progress lines
-   * ({ status, total?, completed? }) straight to the client, which reads the
-   * response body to render a progress bar. Uses @Res() to stream manually.
+   * Stream a model pull. Writes NDJSON progress lines ({ status, total?, completed? }),
+   * which the client reads off the response body to render a progress bar. Uses @Res()
+   * to stream manually.
    *
-   * LM Studio has no download API and the service answers 400 for it — thrown before
-   * anything is written, so the client still gets the standard `{ error }` envelope.
+   * One shape for both servers: Ollama's `/api/pull` produces those lines itself, and
+   * the service translates LM Studio's download job into them (see lmstudio-download.ts).
+   * A failure to START is thrown before anything is written, so the client still gets the
+   * standard `{ error }` envelope; a failure part-way through arrives as an `{ error }`
+   * line on a 200 body, because by then the headers are long gone.
    */
   @ManagedForbidden('pulling a model spends the operator disk and GPU from inside a customer instance')
   @Post('pull')
