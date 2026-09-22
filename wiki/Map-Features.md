@@ -17,7 +17,7 @@ The scopes required for Mapbox GL are:
 
 ## Satellite view
 
-A round button in the bottom-left corner of the Leaflet map flips the base layer between the normal map tiles and **satellite** imagery (ESRI World Imagery — no API key needed, usable up to zoom 19). The icon always shows the layer it switches to. Your choice is stored on your account (`map_base_layer`), so it carries over to every trip and survives a reload. Markers, route lines, tracks and booking overlays are drawn on top of either layer.
+A round button in the bottom-left corner of the map flips the base layer between the normal map tiles and **satellite** imagery (ESRI World Imagery — no API key needed, usable up to zoom 19). The icon always shows the layer it switches to. The button is on all three renderers: Leaflet swaps its tile layer for the imagery, while MapLibre GL and Mapbox GL put the same imagery on as a raster layer of their own beneath everything TREK draws, so the route, the pins and the tracks stay on top of it. Your choice is stored on your account (`map_base_layer`), the same setting whichever renderer you use, so it carries over to every trip and survives a reload. Markers, route lines, tracks and booking overlays are drawn on top of either layer.
 
 ## Place markers
 
@@ -35,6 +35,16 @@ When zoomed out, nearby markers are grouped into clusters. Clicking a cluster zo
 A day's route is drawn as a solid blue line — a bright core over a darker casing, the look Apple Maps uses — through that day's stops in the order you arranged them. It is not on automatically: switch it on with the **Route** toggle on the day, in the day-plan sidebar on desktop or in the day sheet on mobile. The choice is remembered per trip in your browser, and the mobile map turns it on by default the first time you open a trip you have not decided on.
 
 A straight line is drawn immediately, then upgraded to real road geometry from a public OSRM router (or from a plugin route profile), each leg routed in the transport mode that leg carries. If routing fails, that leg stays a straight line between the two stops.
+
+### The whole trip at once
+
+The **Show whole trip** button in the bottom-right corner of the map swaps the single day for every travel day of the trip, each drawn in its own colour over a white casing so neighbouring days stay apart on any basemap. It is on desktop and on the phone, and your choice is remembered per trip for the rest of the session.
+
+A card above the button lists the days: each one by its title, or by its number when it has none, with an icon per travel mode it is actually driven or walked in and the distance covered that day. The trip's **Total distance** sits at the top. Picking a day in the list selects it, the same as picking it anywhere else.
+
+The total is real routed distance summed over every leg — road geometry from the router, not straight lines between stops — which is what makes it worth building a fuel estimate on. It arrives a few legs at a time: while they are still coming in the total is followed by an ellipsis to say it is a partial sum, and it settles once every leg has answered. A leg the router refuses keeps its straight line on the map and contributes nothing to the total, so a trip with an unroutable hop reads low rather than wrong. Days with fewer than two located stops have no route and are left out of the list entirely.
+
+[Road trip mode](Road-Trip) already draws the whole trip its own way, so the button is not offered while it is on.
 
 ## GPX tracks
 

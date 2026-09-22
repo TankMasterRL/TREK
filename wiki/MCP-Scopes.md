@@ -56,7 +56,7 @@ TREK defines 35 scopes across 17 groups.
 - `list_trips` and `get_trip_summary` are always available regardless of scope — they are navigation tools.
 - `plugins:use` grants no data access of its own. It lets a client call tools published by plugins your administrator installed and approved, and each plugin acts with the permissions the administrator granted it — which can reach further than the scopes on your token. The admin's `mcp:tools` grant is the real boundary, not this scope. No client preset selects it for you: a client has to ask for it by name.
 - Static tokens and web session JWTs have full access equivalent to all scopes, `plugins:use` included.
-- Addon-gated tools (Packing, To-dos, Budget, Collections, Atlas, Collab, Vacay, Journey) require both the relevant scope **and** the corresponding addon to be enabled by an admin. The to-do tools ride the **Packing** addon, not an addon of their own.
+- Addon-gated tools (Packing, To-dos, Budget, Collections, Atlas, Collab, Vacay, Journey, Road trip, Dawarich, Document sync and AirTrail) require both the relevant scope **and** the corresponding addon to be enabled by an admin. The to-do tools ride the **Packing** addon (listed as **Lists** under **Admin → Addons**), not an addon of their own. The Road trip tools sit on `trips:*` and `places:write`, the Dawarich tools on `journey:*`, `places:write` and `atlas:write`, the Document sync tools on `files:*` under the **Documents** addon, and the AirTrail tools on `reservations:*`; without the addon, a client holding those scopes does not see them.
 
 ## Choosing the right scopes
 

@@ -24,6 +24,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': 'Місце видалено',
   'trip.toast.selectDay': 'Спочатку виберіть день',
   'trip.toast.assignedToDay': 'Місце призначено на день',
+  'trip.toast.loadError': 'Не вдалося завантажити подорож',
   'trip.toast.reorderError': 'Помилка зміни порядку',
   'trip.toast.reservationUpdated': 'Бронювання оновлено',
   'trip.toast.reservationAdded': 'Бронювання додано',
@@ -63,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Пошук',
   'transit.searching': 'Пошук…',
   'transit.searchError': 'Не вдалося знайти маршрут. Спробуйте ще раз.',
+  'transit.noResultsVia': 'Через {provider} сполучень не знайдено. Спробуйте інший час або фільтри.',
   'transit.noResults': "З'єднань не знайдено. Спробуйте інший час або фільтри.",
   'transit.direct': 'Прямий',
   'transit.transfers': 'Пересадок: {count}',
@@ -86,5 +88,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Пересадки',
   'transit.walkLabel': 'Пішки',
   'transit.searchHint': 'Шукайте справжні маршрути та додавайте їх одразу до дня — дані від Transitous.',
+  'trip.confirm.deletePlaceNight': 'Ночівля, заброньована в «{name}», зникне разом із місцем.',
+  'trip.confirm.deletePlaceBooked': 'Ночівля, заброньована в «{name}», зникне разом із місцем, а з нею бронювання «{booking}» і пов’язані витрати.',
 };
 export default trip;

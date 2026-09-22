@@ -72,6 +72,23 @@ async function withHarness(userId: number, fn: (h: McpHarness) => Promise<void>)
 // ---------------------------------------------------------------------------
 
 describe('Tool: assign_place_to_day', () => {
+  it('sets and clears a visit day end through the shared service', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const place = createPlace(testDb, trip.id);
+    const visit = createDayAssignment(testDb, day.id, place.id);
+    await withHarness(user.id, async h => {
+      for (const end_day of [true, false]) {
+        const changed = await h.client.callTool({ name: 'set_assignment_end_day', arguments: { tripId: trip.id, assignmentId: visit.id, end_day } });
+        expect(parseToolResult(changed)).toMatchObject({ assignment: { end_day } });
+      }
+      const other = createTrip(testDb, user.id);
+      const refused = await h.client.callTool({ name: 'set_assignment_end_day', arguments: { tripId: other.id, assignmentId: visit.id, end_day: true } });
+      expect(refused.isError).toBe(true);
+    });
+  });
+
   it('assigns a place to a day', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
@@ -384,6 +401,75 @@ describe('Tool: update_assignment_time', () => {
       await h.client.callTool({ name: 'update_assignment_time', arguments: { tripId: trip.id, assignmentId: assignment.id, place_time: '10:00' } });
       expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'assignment:updated', expect.any(Object));
     });
+  });
+
+  // Same service method as PUT /assignments/:id/time, so the same order and the same
+  // three events. A: untimed, B: 15:00, C: untimed, D gets 10:00.
+  it('keeps untimed stops in place, sorts the timed ones and sends the day and its vias like REST', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const place = createPlace(testDb, trip.id);
+    const [a, b, c, d] = [0, 1, 2, 3].map(i => createDayAssignment(testDb, day.id, place.id, { order_index: i }).id);
+    testDb.prepare('UPDATE day_assignments SET assignment_time = ? WHERE id = ?').run('15:00', b);
+    const via = Number(testDb.prepare(
+      'INSERT INTO roadtrip_vias (day_id, after_order_index, sequence, lat, lng) VALUES (?, 1, 0, 48.1, 11.5)'
+    ).run(day.id).lastInsertRowid);
+
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'update_assignment_time', arguments: { tripId: trip.id, assignmentId: d, place_time: '10:00' } });
+      expect((parseToolResult(result) as { assignment: { assignment_time: string } }).assignment.assignment_time).toBe('10:00');
+    });
+
+    const order = (testDb.prepare('SELECT id FROM day_assignments WHERE day_id = ? ORDER BY order_index').all(day.id) as { id: number }[]).map(r => r.id);
+    expect(order).toEqual([a, d, b, c]);
+    expect(testDb.prepare('SELECT after_order_index FROM roadtrip_vias WHERE id = ?').get(via)).toEqual({ after_order_index: 2 });
+    expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'assignment:reordered', expect.objectContaining({ dayId: day.id, orderedIds: [a, d, b, c] }));
+    expect(broadcastMock).toHaveBeenCalledWith(trip.id, 'roadtripVia:changed', expect.objectContaining({
+      dayId: day.id,
+      vias: [expect.objectContaining({ id: via, after_order_index: 2 })],
+    }));
+  });
+
+  it('sends only the row when the start leaves the day as it was', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const place = createPlace(testDb, trip.id);
+    const [a, b, c] = [0, 1, 2].map(i => createDayAssignment(testDb, day.id, place.id, { order_index: i }).id);
+
+    await withHarness(user.id, async (h) => {
+      await h.client.callTool({ name: 'update_assignment_time', arguments: { tripId: trip.id, assignmentId: c, place_time: '14:00' } });
+    });
+
+    const order = (testDb.prepare('SELECT id FROM day_assignments WHERE day_id = ? ORDER BY order_index').all(day.id) as { id: number }[]).map(r => r.id);
+    expect(order).toEqual([a, b, c]);
+    expect(broadcastMock.mock.calls.map(call => call[1])).toEqual(['assignment:updated']);
+  });
+
+  it('leaves a day out of time order as it is when the call names only the end', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const place = createPlace(testDb, trip.id);
+    // B starts before A and was put behind it on purpose.
+    const [a, b] = [0, 1].map(i => createDayAssignment(testDb, day.id, place.id, { order_index: i }).id);
+    testDb.prepare("UPDATE day_assignments SET assignment_time = '14:00' WHERE id = ?").run(a);
+    testDb.prepare("UPDATE day_assignments SET assignment_time = '10:00' WHERE id = ?").run(b);
+    const via = Number(testDb.prepare(
+      'INSERT INTO roadtrip_vias (day_id, after_order_index, sequence, lat, lng) VALUES (?, 0, 0, 48.1, 11.5)'
+    ).run(day.id).lastInsertRowid);
+
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'update_assignment_time', arguments: { tripId: trip.id, assignmentId: b, end_time: '11:30' } });
+      expect((parseToolResult(result) as { assignment: { assignment_time: string; assignment_end_time: string } }).assignment)
+        .toMatchObject({ assignment_time: '10:00', assignment_end_time: '11:30' });
+    });
+
+    const order = (testDb.prepare('SELECT id FROM day_assignments WHERE day_id = ? ORDER BY order_index').all(day.id) as { id: number }[]).map(r => r.id);
+    expect(order).toEqual([a, b]);
+    expect(testDb.prepare('SELECT after_order_index FROM roadtrip_vias WHERE id = ?').get(via)).toEqual({ after_order_index: 0 });
+    expect(broadcastMock.mock.calls.map(call => call[1])).toEqual(['assignment:updated']);
   });
 
   it('returns error when assignment not found', async () => {

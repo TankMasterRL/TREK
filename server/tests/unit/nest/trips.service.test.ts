@@ -54,6 +54,7 @@ import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser, createTrip, createReservation, createPlace, createDay, createDayAssignment, createDayNote, addTripMember } from '../../helpers/factories';
+import { MAX_TRIP_DAYS } from '@trek/shared';
 import { DatabaseService } from '../../../src/nest/database/database.service';
 import { DaysService } from '../../../src/nest/days/days.service';
 import { PermissionsService } from '../../../src/nest/permissions/permissions.service';
@@ -74,6 +75,7 @@ import { UserCleanupService } from '../../../src/nest/auth/user-cleanup.service'
 import { TripMembersService } from '../../../src/nest/trip-members/trip-members.service';
 import { TripReadModelService } from '../../../src/nest/trip-read-model/trip-read-model.service';
 import { AccommodationsService } from '../../../src/nest/accommodations/accommodations.service';
+import { accommodationsOver, makeAccommodationsService } from '../../helpers/accommodations-service';
 import { MapsService } from '../../../src/nest/maps/maps.service';
 import { UnsplashService } from '../../../src/nest/unsplash/unsplash.service';
 import { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
@@ -111,13 +113,14 @@ const placesSvc = new PlacesService(
   photoCache,
   new JourneyDomainService(dbs(), new RealtimeService(), new TrekPhotosRepository(dbs())),
   makeStorageFixture('').storage,
+  accommodationsOver(dbs()),
 );
-const accommodationsSvc = new AccommodationsService(dbs(), new PermissionsService(dbs()), new RealtimeService());
+const accommodationsSvc = makeAccommodationsService(testDb);
 const createAccommodation = accommodationsSvc.createAccommodation.bind(accommodationsSvc);
 
 const svc = new TripsService(
   dbs(),
-  new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs())),
+  new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs()), accommodationsSvc),
   daysSvc,
   new PermissionsService(dbs()),
   budgetSvc,
@@ -130,7 +133,7 @@ const membersSvc = new TripMembersService(dbs(), budgetSvc, new UserCleanupServi
 const readModelSvc = new TripReadModelService(
   dbs(), membersSvc, daysSvc, accommodationsSvc, budgetSvc,
   new PackingService(dbs(), new PermissionsService(dbs()), new RealtimeService(), notificationsStub()),
-  new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs())),
+  new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs()), accommodationsSvc),
   new CollabService(dbs(), new PermissionsService(dbs()), new RealtimeService(), notificationsStub(), coversFx.storage, new RateLimitService()),
   placesSvc,
   new TodoService(dbs(), new PermissionsService(dbs()), new RealtimeService()),
@@ -165,6 +168,10 @@ function getAssignments(dayId: number) {
 
 function getNotes(dayId: number) {
   return testDb.prepare('SELECT * FROM day_notes WHERE day_id = ?').all(dayId) as { id: number; day_id: number }[];
+}
+
+function addDaysIso(date: string, n: number) {
+  return new Date(Date.parse(date + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -256,6 +263,24 @@ describe('generateDays', () => {
     // New days 4 and 5 are empty
     expect(getAssignments(daysAfter[3].id)).toHaveLength(0);
     expect(getAssignments(daysAfter[4].id)).toHaveLength(0);
+  });
+
+  it('TRIP-SVC-062: a range longer than a year gets every one of its days (#2403)', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-01-26', end_date: '2025-01-28' });
+    // The reporter's range: 368 days, and the days used to stop at 365.
+    svc.generateDays(trip.id, '2025-01-26', '2026-01-28');
+    const days = getDays(trip.id);
+    expect(days).toHaveLength(368);
+    expect(days[364].date).toBe('2026-01-25');
+    expect(days[367]).toMatchObject({ day_number: 368, date: '2026-01-28' });
+  });
+
+  it('TRIP-SVC-063: a dateless day_count is clamped to MAX_TRIP_DAYS', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    svc.generateDays(trip.id, null, null, MAX_TRIP_DAYS + 50);
+    expect(getDays(trip.id)).toHaveLength(MAX_TRIP_DAYS);
   });
 
   it('TRIP-SVC-013: clearing dates converts all days to dateless without destroying assignments', () => {
@@ -449,9 +474,9 @@ describe('resyncAccommodationDays (#1288)', () => {
 
   const insertAccommodation = (tripId: number, startDayId: number, endDayId: number) => {
     const place = createPlace(testDb, tripId, { name: 'Grand Hotel' });
-    const acc = createAccommodation(tripId, {
+    const { accommodation: acc } = createAccommodation(tripId, {
       place_id: place.id, start_day_id: startDayId, end_day_id: endDayId,
-    }) as { id: number };
+    }) as { accommodation: { id: number } };
     const linkedRes = testDb.prepare(
       'SELECT id FROM reservations WHERE accommodation_id = ?',
     ).get(acc.id) as { id: number };
@@ -477,6 +502,22 @@ describe('resyncAccommodationDays (#1288)', () => {
     const res = getRes(linkedResId);
     expect(res.day_id).toBe(acc.start_day_id);
     expect(res.reservation_time?.slice(0, 10)).toBe('2025-06-11');
+  });
+
+  it('TRIP-SVC-059: the day stop a booking wrote follows it when the trip is re-dated', () => {
+    // Booking a night also puts its place on the check-in day. Re-dating the trip moves
+    // the stay to whichever day row now carries its date, and the stop has to go with
+    // it, or the route runs through a day the traveller is no longer staying on.
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-06-10', end_date: '2025-06-14' });
+    const { accId } = insertAccommodation(trip.id, dayFor(trip.id, '2025-06-11'), dayFor(trip.id, '2025-06-13'));
+    const stopOf = () => testDb.prepare('SELECT day_id FROM day_assignments WHERE accommodation_id = ?').get(accId) as { day_id: number };
+    expect(stopOf().day_id).toBe(dayFor(trip.id, '2025-06-11'));
+
+    svc.updateTrip(trip.id, user.id, { start_date: '2025-06-09', end_date: '2025-06-14' }, 'user');
+
+    expect(stopOf().day_id).toBe(getAcc(accId).start_day_id);
+    expect(stopOf().day_id).toBe(dayFor(trip.id, '2025-06-11'));
   });
 
   it('TRIP-SVC-036: moving the whole trip out of the old range keeps the accommodation glued to its days', () => {
@@ -704,6 +745,17 @@ describe('folded trip CRUD', () => {
     expect(getDays(tripId)).toHaveLength(3);
   });
 
+  it('TRIP-SVC-064: create refuses a range past MAX_TRIP_DAYS and writes nothing', () => {
+    const { user } = createUser(testDb);
+    const before = (testDb.prepare('SELECT COUNT(*) AS n FROM trips').get() as { n: number }).n;
+    expect(() => svc.create(user.id, { title: 'Decade', start_date: '2026-01-01', end_date: '2036-01-01' }))
+      .toThrow(`A trip can span at most ${MAX_TRIP_DAYS} days`);
+    expect((testDb.prepare('SELECT COUNT(*) AS n FROM trips').get() as { n: number }).n).toBe(before);
+    // The longest allowed range goes through in full.
+    const { tripId } = svc.create(user.id, { title: 'Longest', start_date: '2026-01-01', end_date: addDaysIso('2026-01-01', MAX_TRIP_DAYS - 1) });
+    expect(getDays(tripId)).toHaveLength(MAX_TRIP_DAYS);
+  });
+
   it('TRIP-SVC-045: remove deletes the trip, cleans skeleton journey entries and detaches filled ones', () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
@@ -752,6 +804,52 @@ describe('folded trip CRUD', () => {
     // No title → source title (|| fallback).
     const secondCopy = svc.copy(trip.id, user.id);
     expect((testDb.prepare('SELECT title FROM trips WHERE id = ?').get(secondCopy) as any).title).toBe('Origin');
+  });
+
+  it('TRIP-SVC-061: copy carries the road-trip shaping, not just the places', () => {
+    // A via is the road the traveller chose over the one the router prefers, and
+    // a day track is the line a day was fitted to. Leaving them behind gave back
+    // a trip that looks complete and quietly drives somewhere else — noticed
+    // only once somebody edits the copy, with nothing left to recover from.
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Norway', start_date: '2025-06-01', end_date: '2025-06-02' });
+    const days = getDays(trip.id);
+    const stop = createPlace(testDb, trip.id, { name: 'Geiranger' });
+    const track = createPlace(testDb, trip.id, { name: 'Scenic route' });
+    testDb.prepare("UPDATE places SET stop_type = 'fuel' WHERE id = ?").run(stop.id);
+    testDb.prepare("UPDATE places SET route_geometry = '[[1,2],[3,4]]' WHERE id = ?").run(track.id);
+    createDayAssignment(testDb, days[0].id, stop.id);
+    testDb.prepare(
+      'INSERT INTO roadtrip_vias (day_id, after_order_index, sequence, lat, lng) VALUES (?, 0, 0, 62.1, 7.2), (?, 0, 1, 62.2, 7.3)',
+    ).run(days[0].id, days[0].id);
+    testDb.prepare('INSERT INTO roadtrip_day_tracks (day_id, place_id, stray_km) VALUES (?, ?, 1.5)')
+      .run(days[0].id, track.id);
+
+    const newTripId = svc.copy(trip.id, user.id, 'Clone');
+    const newDays = getDays(newTripId);
+
+    // The kind of stop each place is survives the copy.
+    const copiedStop = testDb.prepare("SELECT stop_type FROM places WHERE trip_id = ? AND name = 'Geiranger'")
+      .get(newTripId) as { stop_type: string | null };
+    expect(copiedStop.stop_type).toBe('fuel');
+
+    const vias = testDb.prepare('SELECT after_order_index, sequence, lat, lng FROM roadtrip_vias WHERE day_id = ? ORDER BY sequence')
+      .all(newDays[0].id) as { after_order_index: number; sequence: number; lat: number; lng: number }[];
+    expect(vias).toEqual([
+      { after_order_index: 0, sequence: 0, lat: 62.1, lng: 7.2 },
+      { after_order_index: 0, sequence: 1, lat: 62.2, lng: 7.3 },
+    ]);
+
+    // The track points at the COPY's place, never back at the original.
+    const copiedTrack = testDb.prepare('SELECT place_id, stray_km FROM roadtrip_day_tracks WHERE day_id = ?')
+      .get(newDays[0].id) as { place_id: number; stray_km: number };
+    const copiedTrackPlace = testDb.prepare("SELECT id FROM places WHERE trip_id = ? AND name = 'Scenic route'")
+      .get(newTripId) as { id: number };
+    expect(copiedTrack.place_id).toBe(copiedTrackPlace.id);
+    expect(copiedTrack.stray_km).toBe(1.5);
+
+    // And the original keeps exactly what it had.
+    expect(testDb.prepare('SELECT COUNT(*) c FROM roadtrip_vias WHERE day_id = ?').get(days[0].id)).toEqual({ c: 2 });
   });
 
   it('TRIP-SVC-060: copying a trip keeps a staged booking staged', () => {
@@ -866,17 +964,35 @@ describe('folded trip CRUD', () => {
 
 describe('TripsService wrapper helpers', () => {
   it('re-anchors the budget before the trip row leaves its old currency (#1543)', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
     const order: string[] = [];
     const rebaseSpy = vi.spyOn(budgetSvc, 'rebaseTripCurrency').mockImplementation(async () => { order.push('rebase'); });
     const updateSpy = vi.spyOn(svc, 'updateTrip').mockImplementation(() => { order.push('update'); return {} as never; });
     try {
-      await svc.update('9', 1, { currency: 'RUB' } as never, 'user');
+      await svc.update(trip.id, user.id, { currency: 'RUB' } as never, 'user');
       // The rebase reads the outgoing currency off the trip row, so it has to run first.
-      expect(rebaseSpy).toHaveBeenCalledWith('9', 'RUB');
+      expect(rebaseSpy).toHaveBeenCalledWith(trip.id, 'RUB');
       expect(order).toEqual(['rebase', 'update']);
     } finally {
       rebaseSpy.mockRestore();
       updateSpy.mockRestore();
+    }
+  });
+
+  it('TRIP-SVC-068: update refuses a bad range before the budget is rebased (#2403)', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2026-07-01', end_date: '2026-07-07' });
+    const rebaseSpy = vi.spyOn(budgetSvc, 'rebaseTripCurrency').mockResolvedValue();
+    try {
+      await expect(svc.update(trip.id, user.id, { currency: 'USD', end_date: '2036-07-01' }, 'user'))
+        .rejects.toThrow(`A trip can span at most ${MAX_TRIP_DAYS} days`);
+      await expect(svc.update(trip.id, user.id, { currency: 'USD', start_date: '2026-07-10' }, 'user'))
+        .rejects.toThrow('End date must be after start date');
+      expect(rebaseSpy).not.toHaveBeenCalled();
+      await expect(svc.update(99999, user.id, { currency: 'USD' }, 'user')).rejects.toThrow('Trip not found');
+    } finally {
+      rebaseSpy.mockRestore();
     }
   });
 
@@ -940,6 +1056,40 @@ describe('folded quirk branches', () => {
     // Missing trips throw the byte-identical error; invalid ranges reject.
     expect(() => svc.updateTrip(99999, owner.id, {}, 'user')).toThrow('Trip not found');
     expect(() => svc.updateTrip(trip.id, owner.id, { start_date: '2025-06-10', end_date: '2025-06-01' }, 'user')).toThrow('End date must be after start date');
+  });
+
+  it('TRIP-SVC-065: updateTrip refuses a range past MAX_TRIP_DAYS before touching the row', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Week', start_date: '2026-07-01', end_date: '2026-07-07' });
+    expect(() => svc.updateTrip(trip.id, user.id, { title: 'Decade', end_date: '2036-07-01' }, 'user'))
+      .toThrow(`A trip can span at most ${MAX_TRIP_DAYS} days`);
+    expect(testDb.prepare('SELECT title, end_date FROM trips WHERE id = ?').get(trip.id)).toEqual({ title: 'Week', end_date: '2026-07-07' });
+    expect(getDays(trip.id)).toHaveLength(7);
+    // Moving only the start keeps the stored end and is measured against it.
+    expect(() => svc.updateTrip(trip.id, user.id, { start_date: '2020-01-01' }, 'user'))
+      .toThrow(`A trip can span at most ${MAX_TRIP_DAYS} days`);
+  });
+
+  it('TRIP-SVC-066: a trip whose stored range already exceeds the limit can still be renamed', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Legacy' });
+    testDb.prepare("UPDATE trips SET start_date = '2020-01-01', end_date = '2030-01-01' WHERE id = ?").run(trip.id);
+    const result = svc.updateTrip(trip.id, user.id, { title: 'Renamed' }, 'user');
+    expect(result.newTitle).toBe('Renamed');
+    expect(result.changes).toEqual({ title: 'Renamed' });
+    // A day_count would rebuild the grid over the whole stored range, so it is held to the limit too.
+    expect(() => svc.updateTrip(trip.id, user.id, { day_count: 5 }, 'user'))
+      .toThrow(`A trip can span at most ${MAX_TRIP_DAYS} days`);
+    expect(getDays(trip.id)).toHaveLength(0);
+  });
+
+  it('TRIP-SVC-067: a start date moved past the stored end is refused instead of emptying the trip', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Week', start_date: '2026-07-01', end_date: '2026-07-07' });
+    expect(() => svc.updateTrip(trip.id, user.id, { start_date: '2026-07-10' }, 'user'))
+      .toThrow('End date must be after start date');
+    expect(testDb.prepare('SELECT start_date FROM trips WHERE id = ?').get(trip.id)).toEqual({ start_date: '2026-07-01' });
+    expect(getDays(trip.id)).toHaveLength(7);
   });
 
   it('TRIP-SVC-049: addMember inserts the membership and reports the trip title; removeMember deletes it', () => {
@@ -1035,7 +1185,7 @@ describe('quirk fixes', () => {
     const fdbs = failingConnection(match);
     return new TripsService(
       fdbs,
-      new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs())),
+      new ReservationsService(dbs(), new PermissionsService(dbs()), budgetSvc, new RealtimeService(), notificationsStub(), new ReservationsReadRepository(dbs()), accommodationsSvc),
       daysSvc,
       new PermissionsService(dbs()),
       budgetSvc,

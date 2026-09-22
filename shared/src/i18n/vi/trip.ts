@@ -24,6 +24,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': 'Địa điểm đã bị xóa',
   'trip.toast.selectDay': 'Vui lòng chọn một ngày trước',
   'trip.toast.assignedToDay': 'Địa điểm đã được gán vào ngày',
+  'trip.toast.loadError': 'Không thể tải chuyến đi',
   'trip.toast.reorderError': 'Không thể sắp xếp lại',
   'trip.toast.reservationUpdated': 'Đã cập nhật đặt chỗ',
   'trip.toast.reservationAdded': 'Đã thêm đặt chỗ',
@@ -63,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Tìm kiếm',
   'transit.searching': 'Đang tìm…',
   'transit.searchError': 'Tìm tuyến thất bại. Vui lòng thử lại.',
+  'transit.noResultsVia': 'Không tìm thấy tuyến nào qua {provider}. Hãy thử giờ khác hoặc bộ lọc khác.',
   'transit.noResults': 'Không tìm thấy tuyến. Hãy thử thời gian hoặc bộ lọc khác.',
   'transit.direct': 'Trực tiếp',
   'transit.transfers': '{count} lần chuyển tuyến',
@@ -86,5 +88,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Chuyển tuyến',
   'transit.walkLabel': 'Đi bộ',
   'transit.searchHint': 'Tìm các kết nối thực tế và thêm thẳng vào ngày — dữ liệu qua Transitous.',
+  'trip.confirm.deletePlaceNight': 'Đêm đã đặt tại “{name}” sẽ mất cùng với địa điểm.',
+  'trip.confirm.deletePlaceBooked': 'Đêm đã đặt tại “{name}” sẽ mất cùng với địa điểm, kèm theo đặt chỗ “{booking}” và mọi chi phí liên quan.',
 };
 export default trip;

@@ -61,7 +61,7 @@ export class PublicApiService {
    * turns both into the same 404, so the endpoint cannot be used to probe which
    * trip ids exist.
    */
-  getTrip(tripId: number, userId: number, include: PublicApiInclude[]): PublicApiTrip | null {
+  getTrip(tripId: number, userId: number, include: PublicApiInclude[], granted: readonly string[] = include): PublicApiTrip | null {
     if (!this.db.canAccessTrip(tripId, userId)) return null;
     const row = this.db.get<TripRow>(
       `SELECT id, title, description, start_date, end_date, currency, is_archived, updated_at
@@ -74,8 +74,13 @@ export class PublicApiService {
     // Places, notes and reservations hang off days, so asking for one of them
     // and not for `days` used to return the trip and nothing else — silently,
     // which is the worst way to answer. Days are implied instead.
+    //
+    // Implied, not granted: `granted` is what the key may read at all, and a key
+    // narrowed to places must not get the day's title and free-text notes back
+    // through the container those places arrive in. The shell it does get is the
+    // join key the children are useless without.
     if (DAY_SCOPED.some((section) => include.includes(section))) {
-      trip.days = this.buildDays(tripId, include);
+      trip.days = this.buildDays(tripId, include, granted.includes('days'));
     }
     if (include.includes('places')) {
       trip.unplanned_places = this.buildUnplannedPlaces(tripId);
@@ -100,7 +105,7 @@ export class PublicApiService {
    * rather than queried per day — a two-week trip would otherwise cost 42 round
    * trips for the same rows.
    */
-  private buildDays(tripId: number, include: PublicApiInclude[]): PublicApiDay[] {
+  private buildDays(tripId: number, include: PublicApiInclude[], dayFields: boolean): PublicApiDay[] {
     const days = this.db.all<DayRow>(
       `SELECT id, day_number, date, title, notes
          FROM days WHERE trip_id = ? ORDER BY day_number ASC`,
@@ -117,8 +122,8 @@ export class PublicApiService {
     return days.map((day) => ({
       date: day.date,
       day_number: day.day_number,
-      title: day.title ?? null,
-      notes: day.notes ?? null,
+      title: dayFields ? day.title ?? null : null,
+      notes: dayFields ? day.notes ?? null : null,
       places: placesByDay.get(day.id) ?? [],
       day_notes: notesByDay.get(day.id) ?? [],
       reservations: reservationsByDay.get(day.id) ?? [],
@@ -131,6 +136,12 @@ export class PublicApiService {
    * `order_index` decides the sequence and is then dropped: it is a storage detail
    * that only means something relative to its siblings, and an array already
    * carries order.
+   *
+   * A booked night puts a stop of its own on its check-in day, so the route can
+   * reach the hotel. That stop is the booking, not a place the traveller planned
+   * to visit, and the booking is already reported in full under `accommodations`;
+   * listed here as well it would read as two different intentions. Same rule as
+   * the shortlist below.
    */
   private placesByDay(tripId: number): Map<number, PublicApiPlace[]> {
     const rows = this.db.all<PlaceRow>(
@@ -142,6 +153,7 @@ export class PublicApiService {
          JOIN places p ON p.id = da.place_id
          LEFT JOIN categories c ON c.id = p.category_id
         WHERE p.trip_id = ?
+          AND da.accommodation_id IS NULL
         ORDER BY da.day_id ASC, da.order_index ASC`,
       tripId,
     );

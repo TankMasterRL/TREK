@@ -39,7 +39,7 @@ The differences that matter when you pick:
 |---|---|---|
 | Default endpoint | `http://localhost:11434/v1` | `http://localhost:1234/v1` |
 | Adding models | TREK can **pull** one for you (see below) | Add it in the LM Studio app, or `lms get <model>` — then **Refresh** in TREK |
-| Model ids | tagged, e.g. `qwen3:8b` | as LM Studio lists them, e.g. `qwen3-8b` |
+| Model ids | tagged, e.g. `qwen3.5:4b` | as LM Studio lists them, e.g. `qwen3.5-4b` |
 | Server must be reachable | yes — start it before importing | yes — LM Studio's **local server** must be running (Developer tab → *Start Server*) |
 
 LM Studio loads a model on demand when its just-in-time loading is on (the default). With it off, load the model in LM Studio first or the request comes back as an error on the parse result.
@@ -53,7 +53,7 @@ When you enable the addon, a configuration panel appears directly under it in [A
 - **Provider** — Local · Ollama, Local · LM Studio, OpenAI, or Anthropic.
 - **Base URL** — shown for every provider except Anthropic. Defaults to `http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio, or `https://api.openai.com/v1` for OpenAI. Point it at any OpenAI-compatible endpoint here.
 - **API key** — optional for a local server (`(often not required)`), required for the cloud providers. Stored **encrypted**; it is shown masked (`••••••••`) once saved, and leaving it unchanged keeps the stored key.
-- **Model** — the model id (e.g. `qwen3:8b`, `qwen3-8b`, `gpt-4o`, `claude-opus-4-8`).
+- **Model** — the model id (e.g. `qwen3.5:4b`, `qwen3.5-4b`, `gpt-4o`, `claude-opus-4-8`).
 
 If you set a provider and model here, it applies to **all users** and overrides their personal settings. Leave the panel blank to let each user bring their own model (see below).
 
@@ -62,7 +62,7 @@ If you set a provider and model here, it applies to **all users** and overrides 
 With either local provider selected, the panel talks to that server directly:
 
 - **Installed on the server** lists the models it already has, with a **Refresh** button. Click a model to select it. (For LM Studio, embedding models are left out — they cannot extract a booking.)
-- **Pull a recommended model** (Ollama only) downloads a model with a live progress bar. The one recommended model is **Qwen3 — 8B** (`qwen3:8b`) — *best extraction quality & speed on CPU (thinking auto-disabled) · Apache-2.0*. Once the pull finishes it is selected automatically.
+- **Pull a recommended model** (Ollama only) downloads a model with a live progress bar. The one recommended model is **Qwen3.5 — 4B** (`qwen3.5:4b`, 3.4 GB, 256K context): small and quick on a CPU-only host, "thinking" is disabled automatically, Apache-2.0. Like every local model it receives the document's extracted text, so scanned PDFs still need Anthropic (see below). Once the pull finishes it is selected automatically.
 
 LM Studio has no download API, so TREK does not offer a Pull for it: add the model in the LM Studio app (or run `lms get <model>`) and press **Refresh**.
 

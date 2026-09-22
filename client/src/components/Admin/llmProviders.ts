@@ -71,8 +71,8 @@ export const LLM_PROVIDER_META: LlmProviderMeta[] = [
 /** Curated models the local extractor is tuned for, pullable via Ollama. The router drives
  *  one model per document via the server's schema-enforced sampling; "thinking" is disabled
  *  automatically, so the Qwen3 family works without any tuning. A host only needs one. */
-export const RECOMMENDED_MODELS: { id: string; label: string; note: string; recommended: boolean }[] = [
-  { id: 'qwen3:8b', label: 'Qwen3 — 8B', note: 'Recommended · best extraction quality & speed on CPU (thinking auto-disabled) · Apache-2.0', recommended: true },
+export const RECOMMENDED_MODELS: { id: string; label: string; note: string; recommended: boolean; vision: boolean }[] = [
+  { id: 'qwen3.5:4b', label: 'Qwen3.5 — 4B', note: 'Recommended · small and quick on CPU, 3.4 GB download, 256K context (thinking auto-disabled) · Apache-2.0', recommended: true, vision: true },
 ]
 
 /**

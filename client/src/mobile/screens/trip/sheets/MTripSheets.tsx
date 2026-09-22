@@ -23,6 +23,12 @@ import MNoteSheet, { type MNoteSheetPayload } from './MNoteSheet'
 import MImportSheet from './MImportSheet'
 import MExportSheet from './MExportSheet'
 import MMehrSheet from './MMehrSheet'
+import MRtStopSheet from '../roadtrip/MRtStopSheet'
+import MRtStaySheet from '../roadtrip/MRtStaySheet'
+import MRtKindSheet from '../roadtrip/MRtKindSheet'
+import MRtInfoSheet from '../roadtrip/MRtInfoSheet'
+import MRtCorridorSheet from '../roadtrip/MRtCorridorSheet'
+import MRtDraftSheet from '../roadtrip/MRtDraftSheet'
 import type { BookingExpenseRequest } from '../../../../components/Planner/BookingCostsSection.types'
 import type { BudgetItem } from '../../../../types'
 import type { MTripSheetsProps } from '../MTripShell'
@@ -63,6 +69,17 @@ export default function MTripSheets({ planner, shell }: MTripSheetsProps) {
       <MTransportSheet planner={planner} shell={shell} />
       <MBrowseActionsSheet planner={planner} shell={shell} />
       <MMehrSheet planner={planner} shell={shell} />
+      {/* The stage's own sheets. Each one checks shell.sheet?.id itself, the draft
+          sheet hangs off planner.stopDraft the way the place editor hangs off its flag. */}
+      <MRtStopSheet planner={planner} shell={shell} />
+      <MRtStaySheet planner={planner} shell={shell} />
+      <MRtKindSheet planner={planner} shell={shell} />
+      <MRtInfoSheet planner={planner} shell={shell} />
+      {/* Before the draft sheet, not after: both sit at the same z, so the one mounted
+          later paints on top, and taking a hit onto the trip opens the draft OVER the
+          search it came from. */}
+      <MRtCorridorSheet planner={planner} shell={shell} />
+      <MRtDraftSheet planner={planner} />
       <MExportSheet planner={planner} shell={shell} />
       <MNoteSheet
         planner={planner}
@@ -162,12 +179,20 @@ export default function MTripSheets({ planner, shell }: MTripSheetsProps) {
       />
 
       {/* Delete-place confirm behind handleDeletePlace (the place edit sheet
-          arms the same flag for its own two-tap delete — skip it there). */}
+          arms the same flag for its own two-tap delete — skip it there).
+          A night booked at the place goes down with it, and with the night
+          the booking and its expense: the planner adds that as a second
+          sentence, the same one the desktop question carries. */}
       <MConfirmSheet
         open={planner.deletePlaceId != null && !planner.showPlaceForm}
         onClose={() => planner.setDeletePlaceId(null)}
         title={t('common.delete')}
-        message={t('trip.confirm.deletePlace')}
+        message={planner.deletePlaceNote ? (
+          <>
+            <span className="block">{t('trip.confirm.deletePlace')}</span>
+            <span className="mt-1 block">{planner.deletePlaceNote}</span>
+          </>
+        ) : t('trip.confirm.deletePlace')}
         confirmLabel={t('common.delete')}
         cancelLabel={t('common.cancel')}
         danger

@@ -7,6 +7,9 @@ import { useToast } from '../shared/Toast'
 import { Puzzle, ListChecks, Wallet, FileText, CalendarDays, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, MessageCircle, StickyNote, BarChart3, Sparkles, Luggage, Plane, Server, Cloud, Bookmark, Users, Loader2 } from 'lucide-react'
 import CustomSelect from '../shared/CustomSelect'
 import EmptyState from '../shared/EmptyState'
+import DawarichIcon from '../shared/DawarichIcon'
+import AirTrailIcon from '../shared/AirTrailIcon'
+import { DOCUMENT_PROVIDER_ICONS } from '../shared/DocumentProviderIcons'
 import AddonTile from './AddonTile'
 import AddonSubRow from './AddonSubRow'
 import { useLlmParsingConfig } from './useLlmParsingConfig'
@@ -17,6 +20,9 @@ import { LLM_MASKED, LLM_PROVIDER_META, RECOMMENDED_MODELS } from './llmProvider
 // used to land on the fallback.
 const ICON_MAP = {
   ListChecks, Wallet, FileText, CalendarDays, Puzzle, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, Plane, Bookmark, Users, Sparkles,
+  // Dawarich ships a brand mark rather than a lucide name, the same way the photo
+  // providers below do. Keyed by the string in the addons table.
+  Dawarich: DawarichIcon,
 }
 
 function ImmichIcon({ size = 14 }: { size?: number }) {
@@ -38,6 +44,9 @@ function SynologyIcon({ size = 14 }: { size?: number }) {
 const PROVIDER_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   immich: ImmichIcon,
   synologyphotos: SynologyIcon,
+  // The document providers' own marks, single-colour so they read as glyphs in
+  // a row of lucide icons and invert with the theme.
+  ...DOCUMENT_PROVIDER_ICONS,
 }
 
 interface Addon {
@@ -61,9 +70,20 @@ interface ProviderOption {
 interface AddonIconProps {
   name: string
   size?: number
+  /** A switched-off addon greys its icon out, brand marks included. */
+  enabled?: boolean
 }
 
-function AddonIcon({ name, size = 20 }: AddonIconProps) {
+function AddonIcon({ name, size = 20, enabled = true }: AddonIconProps) {
+  // The brand marks are badges, not glyphs: they fill the framed slot instead of
+  // sitting in the middle of it at glyph size, and they grey out when the addon
+  // is off — the lucide glyphs get that from the slot's text colour, an <img>
+  // has to be told.
+  if (name === 'Dawarich') return <DawarichIcon fill muted={!enabled} />
+  // 'Plane' is the icon string airtrail was seeded with, and INSERT OR IGNORE
+  // means every existing install still carries it — so the brand is keyed on
+  // that rather than on a new name no row would ever have.
+  if (name === 'Plane') return <AirTrailIcon fill muted={!enabled} />
   const Icon = ICON_MAP[name] || Puzzle
   return <Icon size={size} />
 }
@@ -76,11 +96,12 @@ const TYPE_META: Record<string, { icon: ComponentType<{ size?: number }>; labelK
   integration: { icon: Link2, labelKey: 'admin.addons.type.integration', hintKey: 'admin.addons.integrationHint' },
 }
 
-interface CollabFeatures { chat: boolean; notes: boolean; polls: boolean; whatsnext: boolean }
+interface CollabFeatures { chat: boolean; notes: boolean; links?: boolean; polls: boolean; whatsnext: boolean }
 
 const COLLAB_SUB_FEATURES = [
   { key: 'chat', icon: MessageCircle, titleKey: 'admin.collab.chat.title', subtitleKey: 'admin.collab.chat.subtitle' },
   { key: 'notes', icon: StickyNote, titleKey: 'admin.collab.notes.title', subtitleKey: 'admin.collab.notes.subtitle' },
+  { key: 'links', icon: Link2, titleKey: 'collab.tabs.links', subtitleKey: 'admin.collab.links.subtitle' },
   { key: 'polls', icon: BarChart3, titleKey: 'admin.collab.polls.title', subtitleKey: 'admin.collab.polls.subtitle' },
   { key: 'whatsnext', icon: Sparkles, titleKey: 'admin.collab.whatsnext.title', subtitleKey: 'admin.collab.whatsnext.subtitle' },
 ] as const
@@ -122,12 +143,18 @@ export default function AddonManager({ bagTrackingEnabled, onToggleBagTracking, 
     // Journey off disables every photo provider with it, and the response carries
     // only Journey. Without re-reading, switching Journey back on brings the shelf
     // up with providers the database has long since turned off.
-    if (addon.id === 'journey') await loadAddons()
+    // Same for Documents: switching it off disables every document provider in
+    // the database, and the response carries only the addon itself.
+    if (addon.id === 'journey' || addon.id === 'documents') await loadAddons()
     toast.success(t('admin.addons.toast.updated'))
   }
 
   const isPhotoProviderAddon = (addon: Addon) => {
     return addon.type === 'photo_provider'
+  }
+
+  const isDocumentProviderAddon = (addon: Addon) => {
+    return addon.type === 'document_provider'
   }
 
   const isPhotosAddon = (addon: Addon) => {
@@ -136,10 +163,18 @@ export default function AddonManager({ bagTrackingEnabled, onToggleBagTracking, 
   }
 
   const photoProviderAddons = addons.filter(isPhotoProviderAddon)
+  const documentProviderAddons = addons.filter(isDocumentProviderAddon)
   const tripAddons = addons.filter(a => a.type === 'trip' && !isPhotosAddon(a))
   const globalAddons = addons.filter(a => a.type === 'global')
   const integrationAddons = addons.filter(a => a.type === 'integration')
   const providerOptions: ProviderOption[] = photoProviderAddons.map((provider) => ({
+      key: provider.id,
+      label: provider.name,
+      description: provider.description,
+      enabled: provider.enabled,
+      toggle: () => handleToggle(provider),
+    }))
+  const documentProviderOptions: ProviderOption[] = documentProviderAddons.map((provider) => ({
       key: provider.id,
       label: provider.name,
       description: provider.description,
@@ -185,6 +220,25 @@ export default function AddonManager({ bagTrackingEnabled, onToggleBagTracking, 
         )
       })
     }
+    // Document providers are the Documents tile's shelf, the way photo providers
+    // are Journey's. Unlike those they carry no credential form here: a document
+    // connection belongs to a trip, not to a user, so it is entered in the trip's
+    // file manager. The admin decides only whether a provider may be offered.
+    if (addon.id === 'documents' && addon.enabled && documentProviderOptions.length > 0) {
+      return documentProviderOptions.map(provider => {
+        const ProviderIcon = PROVIDER_ICONS[provider.key]
+        return (
+          <AddonSubRow
+            key={provider.key}
+            icon={ProviderIcon ? <ProviderIcon size={14} /> : undefined}
+            title={provider.label}
+            description={provider.description}
+            enabled={provider.enabled}
+            onToggle={provider.toggle}
+          />
+        )
+      })
+    }
     if (addon.id === 'journey' && addon.enabled && providerOptions.length > 0) {
       return providerOptions.map(provider => {
         const ProviderIcon = PROVIDER_ICONS[provider.key]
@@ -213,7 +267,7 @@ export default function AddonManager({ bagTrackingEnabled, onToggleBagTracking, 
     return (
       <AddonTile
         key={addon.id}
-        icon={<AddonIcon name={addon.icon} size={18} />}
+        icon={<AddonIcon name={addon.icon} size={18} enabled={addon.enabled} />}
         name={label.name}
         description={label.description}
         enabled={addon.enabled}
@@ -233,7 +287,7 @@ export default function AddonManager({ bagTrackingEnabled, onToggleBagTracking, 
     { key: 'global', addons: globalAddons },
     { key: 'integration', addons: integrationAddons },
   ].filter(g => g.addons.length > 0)
-  const enabledCount = addons.filter(a => a.type !== 'photo_provider' && a.enabled).length
+  const enabledCount = addons.filter(a => a.type !== 'photo_provider' && a.type !== 'document_provider' && a.enabled).length
   const totalCount = tripAddons.length + globalAddons.length + integrationAddons.length
 
   return (

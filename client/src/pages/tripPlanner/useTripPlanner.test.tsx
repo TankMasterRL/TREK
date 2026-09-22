@@ -1,7 +1,8 @@
-// FE-TP-HOOK-001 to FE-TP-HOOK-115
+// FE-TP-HOOK-001 to FE-TP-HOOK-119
 import React from 'react'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { TranslationProvider } from '../../i18n/TranslationContext'
+import { useTranslation } from '../../i18n'
 import { useTripPlanner } from './useTripPlanner'
 import { useTripStore, type TripStoreState } from '../../store/tripStore'
 import { useAuthStore } from '../../store/authStore'
@@ -755,6 +756,31 @@ describe('useTripPlanner — map derivations', () => {
     expect(result.current.dayPlaces).toEqual([])
   })
 
+  it('FE-TP-HOOK-031c: a service stop on the selected day takes no number on the map', async () => {
+    const hamburg = geo(1)
+    const pump = geo(2, { stop_type: 'fuel' })
+    const berlin = geo(3)
+    seedTrip({
+      places: [hamburg, pump, berlin],
+      selectedDayId: 7,
+      assignments: {
+        '7': [
+          buildAssignment({ id: 10, day_id: 7, place: hamburg, order_index: 0 }),
+          buildAssignment({ id: 11, day_id: 7, place: pump, order_index: 1 }),
+          buildAssignment({ id: 12, day_id: 7, place: berlin, order_index: 2 }),
+        ],
+      },
+    })
+
+    const { result } = await renderPlanner()
+
+    // The pump is drawn without a badge and the rail gives it no number, so the stop
+    // after it is the second, not the third. The pin and the rail have to agree.
+    expect(result.current.dayOrderMap).toEqual({ 1: [1], 3: [2] })
+    // Still on the map: what is skipped is the number, not the stop.
+    expect(result.current.dayPlaces).toHaveLength(3)
+  })
+
   it('FE-TP-HOOK-032: without a selected day both day derivations stay empty', async () => {
     seedTrip({ places: [geo(1)] })
 
@@ -1023,6 +1049,10 @@ describe('useTripPlanner — add place entry points', () => {
 
     expect(result.current.prefillCoords).toEqual({
       lat: 1, lng: 2, name: 'Cafe', address: '', website: undefined, phone: undefined, osm_id: 'node/1',
+      // A marker with no category behind it is an ordinary place, and the form is told so
+      // rather than left to guess: `stop_type` is write-once on the server, so an absent
+      // field and an explicit "not a service stop" are different answers.
+      stop_type: null, duration_minutes: undefined,
     })
     expect(result.current.showPlaceForm).toBe(true)
     expect(mapsApi.reverse).not.toHaveBeenCalled()
@@ -1252,6 +1282,56 @@ describe('useTripPlanner — place CRUD', () => {
 
     await act(async () => { await result.current.confirmDeletePlaces([1]) })
     expect(toasts.some(t => t.message === 'nope')).toBe(true)
+  })
+
+  it('FE-TP-HOOK-118: the delete question names the booked night, its booking and the expense before the yes', async () => {
+    // The server takes the night down with the place, and the booking and its
+    // expense with the night. The question only named the place, so a traveller
+    // deleting a hotel learnt about the rest from the costs total afterwards.
+    const hotel = buildPlace({ id: 1, name: 'Hotel Fjord', lat: 60.39, lng: 5.32 })
+    const cafe = buildPlace({ id: 2, name: 'Cafe', lat: 1, lng: 2 })
+    seedTrip({
+      places: [hotel, cafe],
+      reservations: [buildReservation({ id: 9, type: 'hotel', title: 'Booking 4711', accommodation_id: 7 })],
+    })
+    vi.mocked(accommodationRepo.list).mockResolvedValue({
+      accommodations: [{ id: 7, trip_id: 42, place_id: 1, start_day_id: 5, end_day_id: 6 }] as never,
+    })
+
+    const { result } = await renderPlanner()
+    await waitFor(() => expect(result.current.tripAccommodations).toHaveLength(1))
+    const { result: i18n } = renderHook(() => useTranslation(), { wrapper })
+
+    act(() => { result.current.handleDeletePlace(1) })
+    expect(result.current.deletePlaceNote).toBe(
+      i18n.current.t('trip.confirm.deletePlaceBooked', { name: 'Hotel Fjord', booking: 'Booking 4711' }),
+    )
+    // Still a question: nothing has been written.
+    expect(actions.deletePlace).not.toHaveBeenCalled()
+
+    // A place without a night adds nothing to the question.
+    act(() => { result.current.handleDeletePlace(2) })
+    expect(result.current.deletePlaceNote).toBeNull()
+  })
+
+  it('FE-TP-HOOK-119: a bulk delete warns once any of the places carries a night, booking or not', async () => {
+    const hotel = buildPlace({ id: 1, name: 'Hotel Fjord', lat: 60.39, lng: 5.32 })
+    const cafe = buildPlace({ id: 2, name: 'Cafe', lat: 1, lng: 2 })
+    seedTrip({ places: [hotel, cafe] })
+    vi.mocked(accommodationRepo.list).mockResolvedValue({
+      accommodations: [{ id: 7, trip_id: 42, place_id: 1, start_day_id: 5, end_day_id: 6 }] as never,
+    })
+
+    const { result } = await renderPlanner()
+    await waitFor(() => expect(result.current.tripAccommodations).toHaveLength(1))
+    const { result: i18n } = renderHook(() => useTranslation(), { wrapper })
+
+    // A night without a partner booking still goes with the place, so it is still named.
+    act(() => { result.current.setDeletePlaceIds([2, 1]) })
+    expect(result.current.deletePlacesNote).toBe(i18n.current.t('trip.confirm.deletePlaceNight', { name: 'Hotel Fjord' }))
+
+    act(() => { result.current.setDeletePlaceIds([2]) })
+    expect(result.current.deletePlacesNote).toBeNull()
   })
 
   it('FE-TP-HOOK-061: a bulk category change restores each previous category group on undo', async () => {
@@ -2034,5 +2114,101 @@ describe('useTripPlanner — misc state', () => {
 
     await waitFor(() => expect(tripsApi.getMembers).toHaveBeenCalled())
     expect(result.current.tripMembers).toEqual([])
+  })
+})
+
+describe('useTripPlanner — road trip stops', () => {
+  /** A day whose stops the rail would show, plus one the rail hides for want of coordinates. */
+  const seedDrive = () => {
+    const places = [
+      buildPlace({ id: 10, name: 'Hamburg', lat: 53.55, lng: 9.99 }),
+      buildPlace({ id: 20, name: 'Lueneburg', lat: 53.25, lng: 10.41 }),
+      buildPlace({ id: 30, name: 'Berlin', lat: 52.52, lng: 13.40 }),
+      // No coordinates, so it never appears in the rail — and must survive a reorder.
+      buildPlace({ id: 40, name: 'Idee ohne Ort', lat: null, lng: null }),
+    ]
+    return seedTrip({
+      days: [buildDay({ id: 7, day_number: 1 })],
+      places,
+      assignments: {
+        '7': [
+          buildAssignment({ id: 1, day_id: 7, place_id: 10, order_index: 0, place: places[0] }),
+          buildAssignment({ id: 2, day_id: 7, place_id: 20, order_index: 1, place: places[1] }),
+          buildAssignment({ id: 3, day_id: 7, place_id: 30, order_index: 2, place: places[2] }),
+          buildAssignment({ id: 4, day_id: 7, place_id: 40, order_index: 3, place: places[3] }),
+        ],
+      },
+    } as unknown as Partial<TripStoreState>)
+  }
+
+  it('FE-TP-HOOK-111: reordering the rail sends the day’s WHOLE order, hidden stops included', async () => {
+    seedDrive()
+    const { result } = await renderPlanner()
+
+    // The rail lists three stops; the fourth has no coordinates and is not on show.
+    await act(async () => { await result.current.reorderRoadtripStop(7, 3, 0) })
+
+    // Both the slice and the WebSocket handler rebuild the day purely from these ids, so
+    // leaving the invisible one out would delete it from every session's store.
+    expect(actions.reorderAssignments).toHaveBeenCalledWith(42, 7, [3, 1, 2, 4])
+  })
+
+  it('FE-TP-HOOK-112: moving a stop onto itself asks the server for nothing', async () => {
+    seedDrive()
+    const { result } = await renderPlanner()
+
+    await act(async () => { await result.current.reorderRoadtripStop(7, 2, 1) })
+
+    expect(actions.reorderAssignments).not.toHaveBeenCalled()
+  })
+
+  it('FE-TP-HOOK-113: an index past the end of the chain lands on the last stop', async () => {
+    seedDrive()
+    const { result } = await renderPlanner()
+
+    await act(async () => { await result.current.reorderRoadtripStop(7, 1, 99) })
+
+    // Clamped to the last VISIBLE stop, which is Berlin — not past the hidden fourth row.
+    expect(actions.reorderAssignments).toHaveBeenCalledWith(42, 7, [2, 3, 1, 4])
+  })
+
+  it('FE-TP-HOOK-114: a failed reorder says so rather than leaving a phantom order', async () => {
+    seedDrive()
+    actions.reorderAssignments.mockRejectedValueOnce(new Error('nope'))
+    const { result } = await renderPlanner()
+
+    await act(async () => { await result.current.reorderRoadtripStop(7, 3, 0) })
+
+    expect(toasts.some(t => t.type === 'error')).toBe(true)
+  })
+
+  it('FE-TP-HOOK-115: an unknown assignment is not reordered into existence', async () => {
+    seedDrive()
+    const { result } = await renderPlanner()
+
+    await act(async () => { await result.current.reorderRoadtripStop(7, 999, 0) })
+
+    expect(actions.reorderAssignments).not.toHaveBeenCalled()
+  })
+})
+
+describe('useTripPlanner — dropping a hit on the drive', () => {
+  it('FE-TP-HOOK-116: a drop far from the route is ignored rather than guessed at', async () => {
+    seedTrip()
+    const { result } = await renderPlanner()
+
+    // No corridor results and no day: nothing to match, so nothing may open.
+    act(() => { result.current.dropPoiOnRoute('node:9', 0, 0) })
+
+    expect(result.current.stopDraft).toBeNull()
+  })
+
+  it('FE-TP-HOOK-117: a drop for an unknown hit opens nothing', async () => {
+    seedTrip()
+    const { result } = await renderPlanner()
+
+    act(() => { result.current.dropPoiOnRoute('node:does-not-exist', 53.5, 9.9) })
+
+    expect(result.current.stopDraft).toBeNull()
   })
 })

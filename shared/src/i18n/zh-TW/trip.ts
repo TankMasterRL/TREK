@@ -24,6 +24,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': '地點已刪除',
   'trip.toast.selectDay': '請先選擇一天',
   'trip.toast.assignedToDay': '地點已分配到當天',
+  'trip.toast.loadError': '無法載入行程',
   'trip.toast.reorderError': '排序失敗',
   'trip.toast.reservationUpdated': '預訂已更新',
   'trip.toast.reservationAdded': '預訂已新增',
@@ -62,6 +63,7 @@ const trip: TranslationStrings = {
   'transit.search': '搜尋',
   'transit.searching': '搜尋中…',
   'transit.searchError': '路線搜尋失敗，請重試。',
+  'transit.noResultsVia': '透過 {provider} 找不到路線。請嘗試其他時間或篩選條件。',
   'transit.noResults': '找不到路線。請嘗試其他時間或篩選條件。',
   'transit.direct': '直達',
   'transit.transfers': '轉乘 {count} 次',
@@ -85,5 +87,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': '轉乘次數',
   'transit.walkLabel': '步行',
   'transit.searchHint': '搜尋實際交通連線，並直接加入當天行程 — 資料由 Transitous 提供。',
+  'trip.confirm.deletePlaceNight': '在「{name}」預訂的過夜會隨該地點一起刪除。',
+  'trip.confirm.deletePlaceBooked': '在「{name}」預訂的過夜會隨該地點一起刪除，同時刪除預訂「{booking}」及其關聯的費用。',
 };
 export default trip;

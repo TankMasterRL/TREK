@@ -22,5 +22,11 @@ const map: TranslationStrings = {
   'map.location.denied': 'A helyhozzáférés le van tiltva. Ellenőrizd a készülék beállításait; a telepített alkalmazásnak saját helyengedélye van, a böngészőtől függetlenül.',
   'map.location.unavailable': 'A tartózkodási helyed nem határozható meg.',
   'map.location.timeout': 'A helymeghatározás túl sokáig tartott. Próbáld újra szabad ég alatt.',
+  'map.overview.show': 'Teljes utazás megjelenítése',
+  'map.overview.hide': 'Teljes utazás elrejtése',
+  'map.overview.total': 'Teljes távolság',
+  'map.attribution': 'Térkép forrásai',
+  'map.overview.unrouted': '{count} szakaszt nem sikerült kiszámítani, a távolságok hiányosak.',
+  'map.overview.dayUnrouted': 'Ennek a napnak {count} szakaszát nem sikerült kiszámítani',
 };
 export default map;
