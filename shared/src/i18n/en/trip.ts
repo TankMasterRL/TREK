@@ -24,6 +24,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': 'Place deleted',
   'trip.toast.selectDay': 'Please select a day first',
   'trip.toast.assignedToDay': 'Place assigned to day',
+  'trip.toast.loadError': 'Could not load the trip',
   'trip.toast.reorderError': 'Failed to reorder',
   'trip.toast.reservationUpdated': 'Reservation updated',
   'trip.toast.reservationAdded': 'Reservation added',
@@ -63,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Search',
   'transit.searching': 'Searching…',
   'transit.searchError': 'Route search failed. Please try again.',
+  'transit.noResultsVia': 'No connections found via {provider}. Try a different time or filters.',
   'transit.noResults': 'No connections found. Try a different time or filters.',
   'transit.direct': 'Direct',
   'transit.transfers': '{count} transfers',
@@ -86,5 +88,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Transfers',
   'transit.walkLabel': 'Walking',
   'transit.searchHint': 'Search real connections and add them straight to the day — data via Transitous.',
+  'trip.confirm.deletePlaceNight': 'The night booked at “{name}” goes with the place.',
+  'trip.confirm.deletePlaceBooked': 'The night booked at “{name}” goes with the place, together with the booking “{booking}” and any expense linked to it.',
 };
 export default trip;

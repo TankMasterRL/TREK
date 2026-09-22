@@ -10,11 +10,25 @@ import { readEnv } from '../../../app-config';
  */
 const DEFAULT_MAX_TOKENS = 4096;
 
+/**
+ * A response the client could not read at all: prose where JSON was asked for,
+ * an empty body, an answer that stopped mid-sentence.
+ *
+ * Its own type because the two callers want opposite things from it. The booking
+ * import lets it through, so the per-file catch in llm-parse.service.ts names the
+ * file and the person gets a warning instead of an empty preview (#2375); the
+ * plugin AI surface, versioned separately and answering an empty value for a
+ * model that talks prose since it shipped, swallows exactly this one and nothing
+ * else. The Anthropic client raises it too.
+ */
+export class UnreadableLlmResponse extends Error {}
+
 /** What one attempt differs in. Each field is switched on by a 400 that asked for it. */
 interface RequestShape {
   tokenParam: 'max_tokens' | 'max_completion_tokens';
   maxTokens: number;
   jsonObject: boolean;
+  noResponseFormat: boolean;
   omitTemperature: boolean;
 }
 
@@ -72,24 +86,27 @@ function rejectsTokenCap(detail: string): boolean {
  *
  * Structured output is requested as `json_schema` first; servers that only
  * support `json_object` (DeepSeek, Mistral, some vLLM/llama.cpp) reject that
- * with a 400, so the request is retried once in `json_object` mode. Three
- * further 400s are answered the same way: `max_tokens` becomes
- * `max_completion_tokens` (#1760), "temperature is not supported" drops the
- * parameter (#2262), and a cap the model will not accept drops back to
- * DEFAULT_MAX_TOKENS.
+ * with a 400, so the request is retried once in `json_object` mode, and a server
+ * that refuses that too gets one last attempt carrying no `response_format` at
+ * all — the shape a proxy's `drop_params` produces, and the only one a provider
+ * without either grammar can answer (#2375). Three further 400s are answered the
+ * same way: `max_tokens` becomes `max_completion_tokens` (#1760), "temperature
+ * is not supported" drops the parameter (#2262), and a cap the model will not
+ * accept drops back to DEFAULT_MAX_TOKENS.
  *
  * Those retries are a loop over what the server actually said, not a fixed
  * chain. A reasoning model rejects `max_tokens` AND `temperature`, the API names
  * only one parameter per response, and it may name either first — a chain of
  * one-shot ifs survives only one of the two orders. Each remedy applies at most
- * once, so this adds at most four extra requests.
+ * once, so this adds at most five extra requests.
  *
  * The size of the reply is capped by LLM_MAX_TOKENS (default DEFAULT_MAX_TOKENS).
  * The API leaves that field optional and unbounded — the ceiling belongs to the
  * model, not to the schema — so a document whose reservations do not fit in the
  * default needs the operator to raise it, and a value the model refuses falls
- * back rather than failing the import. A reply the cap did cut short is reported
- * instead of being swallowed as "no reservations found"; see extract().
+ * back rather than failing the import. A reply the cap cut short breaks off
+ * mid-JSON and so reaches readAnswer as unreadable: it is diagnosed as the cap
+ * rather than as prose, which is the half an operator can act on; see extract().
  */
 export class OpenAiCompatibleClient implements LlmExtractionClient {
   async extract(input: LlmExtractionInput): Promise<Record<string, unknown>[]> {
@@ -136,7 +153,10 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
               { role: 'user', content: userContent },
             ],
       };
-      if (nuextract) return baseBody;
+      // NuExtract never carries one, and the last rung of the 400 ladder has
+      // given it up: the system prompt still dictates the shape, and JSON5 reads
+      // back whatever the model made of it.
+      if (nuextract || shape.noResponseFormat) return baseBody;
       return {
         ...baseBody,
         response_format: shape.jsonObject
@@ -151,9 +171,10 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
       tokenParam: 'max_tokens',
       maxTokens: readEnv().integrations.llmMaxTokens,
       jsonObject: false,
+      noResponseFormat: false,
       omitTemperature: false,
     };
-    const tried = { tokenParam: false, temperature: false, tokenCap: false, jsonObject: false };
+    const tried = { tokenParam: false, temperature: false, tokenCap: false, jsonObject: false, noResponseFormat: false };
 
     let res = await this.send(url, buildBody(shape), input.apiKey);
     let detail = res.ok ? '' : await res.text().catch(() => '');
@@ -188,9 +209,14 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
       if (!named) {
         // NuExtract sends no response_format at all, so it has nothing to fall
         // back to and the 400 is final.
-        if (tried.jsonObject || nuextract) break;
-        shape.jsonObject = true;
-        tried.jsonObject = true;
+        if (nuextract || tried.noResponseFormat) break;
+        if (tried.jsonObject) {
+          shape.noResponseFormat = true;
+          tried.noResponseFormat = true;
+        } else {
+          shape.jsonObject = true;
+          tried.jsonObject = true;
+        }
       }
       res = await this.send(url, buildBody(shape), input.apiKey);
       detail = res.ok ? '' : await res.text().catch(() => '');
@@ -205,22 +231,28 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
     };
     const choice = data.choices?.[0];
     const content = choice?.message?.content;
-    const items = nuextract ? parseNuExtract(content) : parseReservations(content);
-
     // `length` is the spec's "the maximum number of tokens specified in the
-    // request was reached": the reply is a fragment, and its JSON breaks off
-    // mid-object. Lenient parsing recovers nothing from that, so the only
-    // symptom an operator sees is an import that finds no reservations and
-    // explains nothing — which is exactly the case LLM_MAX_TOKENS exists to fix,
-    // and therefore the case worth naming. Whatever did parse is still returned:
-    // a partial list beats discarding the document, with the cap in the log.
-    if (choice?.finish_reason === 'length') {
-      if (items.length === 0) {
-        throw new Error(
-          `the model hit the ${shape.maxTokens}-token response limit before returning any reservation — ` +
-            'raise LLM_MAX_TOKENS, or use a model with a larger output budget',
-        );
-      }
+    // request was reached". The reply is a fragment whose JSON breaks off
+    // mid-object, so readAnswer sees it as unreadable and #2375's diagnosis —
+    // "did not answer with JSON", with the fragment quoted — is all an operator
+    // would get. The cap is the actual cause and the only half they can act on,
+    // so say that instead. Same error type: a truncated answer is still one
+    // nobody could read, and both callers' handling turns on that type.
+    const truncated = choice?.finish_reason === 'length';
+    let items: Record<string, unknown>[];
+    try {
+      items = nuextract ? parseNuExtract(content) : parseReservations(content);
+    } catch (err) {
+      if (truncated && err instanceof UnreadableLlmResponse) throw cutShort(shape.maxTokens);
+      throw err;
+    }
+
+    // Cut short but readable: the model spent the budget before it reached a
+    // reservation, or before it finished the ones it had. Whatever DID parse is
+    // handed on — a partial list beats discarding the document — with the cap
+    // noted in the log so a short result is not mistaken for a short document.
+    if (truncated) {
+      if (items.length === 0) throw cutShort(shape.maxTokens);
       console.warn(
         `[llm-parse] Response truncated at the ${shape.maxTokens}-token limit; kept ${items.length} reservation(s). ` +
           'Raise LLM_MAX_TOKENS to get the rest.',
@@ -250,14 +282,52 @@ export class OpenAiCompatibleClient implements LlmExtractionClient {
   }
 }
 
+/**
+ * The one diagnosis for a reply the token cap cut short, whether or not any of it
+ * parsed — the two branches must not drift into telling an operator different
+ * things about the same cause.
+ */
+function cutShort(maxTokens: number): UnreadableLlmResponse {
+  return new UnreadableLlmResponse(
+    `the model hit the ${maxTokens}-token response limit before returning any reservation — ` +
+      'raise LLM_MAX_TOKENS, or use a model with a larger output budget',
+  );
+}
+
 /** Parse a NuExtract response and map its flat template output to KiReservation nodes. */
 function parseNuExtract(content: string | undefined | null): Record<string, unknown>[] {
-  return nuExtractToKiReservations(parseLenientJson(content));
+  return nuExtractToKiReservations(readAnswer(content));
 }
 
 const USER_TEXT = 'Extract every travel reservation from the following document as schema.org JSON-LD.';
 
-/** Tolerant parse: strip code fences, JSON(5).parse, pull `reservations`. `[]` on failure. */
+/** Tolerant parse: strip code fences, JSON(5).parse, pull `reservations`. */
 function parseReservations(content: string | undefined | null): Record<string, unknown>[] {
-  return toReservationList(parseLenientJson(content));
+  return toReservationList(readAnswer(content));
+}
+
+/**
+ * What the model answered, or an `UnreadableLlmResponse` when nothing could read it.
+ *
+ * An empty list is an answer — the document held no booking, and the import says
+ * so. A response nobody could read is not that answer, and returning `[]` for it
+ * too made a provider that replied with prose, or with nothing at all, look
+ * exactly like an empty voucher: no item, no warning, nothing in the log (#2375).
+ * So only the unreadable throws; whatever parsed is handed on, and an answer that
+ * holds no reservation keeps the old "no reservations found" path.
+ */
+function readAnswer(content: string | undefined | null): unknown {
+  if (!content?.trim()) throw new UnreadableLlmResponse('the model returned an empty response');
+  const parsed = parseLenientJson(content);
+  if (isReadable(parsed)) return parsed;
+  // The response is the booking, so it stays out of a managed operator's log —
+  // same split as the extracted text in llm-parse.service.ts.
+  const snippet = readEnv().managed.enabled ? '' : `: ${content.trim().slice(0, 200)}`;
+  throw new UnreadableLlmResponse(`the model did not answer with JSON${snippet}`);
+}
+
+/** A value the parser actually read back, as opposed to prose or a bare scalar. */
+function isReadable(value: unknown): boolean {
+  if (typeof value === 'string') return isReadable(parseLenientJson(value));
+  return Array.isArray(value) || (!!value && typeof value === 'object');
 }

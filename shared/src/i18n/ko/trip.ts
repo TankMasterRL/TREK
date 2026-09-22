@@ -24,6 +24,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': '장소가 삭제되었습니다',
   'trip.toast.selectDay': '먼저 날을 선택하세요',
   'trip.toast.assignedToDay': '장소가 날에 배정되었습니다',
+  'trip.toast.loadError': '여행을 불러오지 못했습니다',
   'trip.toast.reorderError': '순서 변경 실패',
   'trip.toast.reservationUpdated': '예약이 업데이트되었습니다',
   'trip.toast.reservationAdded': '예약이 추가되었습니다',
@@ -63,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': '검색',
   'transit.searching': '검색 중…',
   'transit.searchError': '경로 검색에 실패했습니다. 다시 시도해 주세요.',
+  'transit.noResultsVia': '{provider}에서 연결편을 찾지 못했습니다. 다른 시간이나 필터를 사용해 보세요.',
   'transit.noResults': '연결편을 찾을 수 없습니다. 시간이나 필터를 변경해 보세요.',
   'transit.direct': '직행',
   'transit.transfers': '환승 {count}회',
@@ -86,5 +88,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': '환승',
   'transit.walkLabel': '도보',
   'transit.searchHint': '실제 연결편을 검색하고 바로 일정에 추가하세요 — 데이터 제공: Transitous.',
+  'trip.confirm.deletePlaceNight': '“{name}”에 예약된 숙박도 장소와 함께 삭제됩니다.',
+  'trip.confirm.deletePlaceBooked': '“{name}”에 예약된 숙박이 장소와 함께 삭제되며, 예약 “{booking}” 및 연결된 지출도 함께 삭제됩니다.',
 };
 export default trip;

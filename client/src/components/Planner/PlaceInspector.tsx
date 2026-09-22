@@ -1,3 +1,4 @@
+import ChargingInfo from '../Roadtrip/ChargingInfo'
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { avatarSrc } from '../../utils/avatarSrc'
 import { safeHttpUrl } from '../../utils/safeUrl'
@@ -21,6 +22,8 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { useAddonStore } from '../../store/addonStore'
 import { useSaveToCollectionStore } from '../../store/saveToCollectionStore'
 import { getCategoryIcon } from '../shared/categoryIcons'
+import DawarichIcon from '../shared/DawarichIcon'
+import { Tooltip } from '../shared/Tooltip'
 import { useToast } from '../shared/Toast'
 import { useTranslation, translateApiError } from '../../i18n'
 import { usePluginStore } from '../../store/pluginStore'
@@ -35,6 +38,8 @@ import { TRANSPORT_TYPES, getAssignmentReservations } from '../../utils/dayMerge
 import { NavigationMenu } from '../shared/NavigationMenu'
 import { resolveOpenNow, resolvePlaceTimeZone, placeWeekdayIndex } from './placeOpenState'
 import { convertHoursLine } from './placeHoursFormat'
+import type { EndDayControlProps } from '../Roadtrip/EndDayControl'
+import VisitControls, { type RoadtripStayControl } from '../Roadtrip/VisitControls'
 
 const detailsCache = new Map()
 
@@ -133,6 +138,9 @@ interface TripMember {
 }
 
 interface PlaceInspectorProps {
+  roadtripActive?: boolean
+  roadtripEndDay?: EndDayControlProps
+  roadtripStay?: RoadtripStayControl
   place: Place | null
   categories: Category[]
   /** 'trip' (default) keeps every existing trip-planner behaviour byte-identical;
@@ -179,7 +187,7 @@ export default function PlaceInspector({
   onClose, onEdit, onDelete, onAssignToDay, onRemoveAssignment,
   files = [], onFileUpload, tripMembers = [], onSetParticipants, onUpdatePlace, onUploadImage, onRate,
   leftWidth = 0, rightWidth = 0,
-  collectionStatus, onCopyToTrip, onSetStatus, onRemoveFromList,
+  collectionStatus, onCopyToTrip, onSetStatus, onRemoveFromList, roadtripEndDay, roadtripStay, roadtripActive,
 }: PlaceInspectorProps) {
   // Plugins that declared a place-detail slot mount at the bottom of this panel,
   // scoped to the open place (trip mode only). Inline-filter like the other sites.
@@ -201,6 +209,12 @@ export default function PlaceInspector({
   const { t, locale, language } = useTranslation()
   // Currency-less prices mean "the trip's currency"; null in collection mode (EUR fallback below).
   const tripCurrency = useTripStore(s => s.trip?.currency)
+  // The day list handed in is the one the planner shows, and in the day view that
+  // list leaves out the stop a booking wrote. The store still holds it, so the
+  // booked-night check below reads the day from there as well: on the list alone
+  // the hotel of a booked night looked unassigned and could be put on the day a
+  // second time, which is the duplicate that check exists to prevent.
+  const storedDayAssignments = useTripStore(s => (selectedDayId ? s.assignments[String(selectedDayId)] : undefined))
   const toast = useToast()
   const timeFormat = useSettingsStore(s => s.settings.time_format) || '24h'
   const distanceUnit = useSettingsStore(s => s.settings.distance_unit) || 'metric'
@@ -313,6 +327,10 @@ export default function PlaceInspector({
     ? ((selectedAssignmentId ? dayAssignments.find(a => a.id === selectedAssignmentId) : null)
       ?? dayAssignments.find(a => a.place?.id === place.id))
     : null
+  /** This stop belongs to a booked night rather than to the traveller. */
+  const bookedNight = assignmentInDay
+    ? assignmentInDay.accommodation_id != null
+    : !!storedDayAssignments?.some(a => a.place?.id === place.id && a.accommodation_id != null)
 
   // The weekday lines are display text; the ring is computed from the structured
   // periods next to them, in the place's own timezone. open_now stays the fallback.
@@ -417,6 +435,8 @@ export default function PlaceInspector({
           )}
 
           {/* Description / Summary */}
+          {roadtripActive && place.stop_type === 'charging' && <ChargingInfo placeId={place.id} />}
+          {(roadtripEndDay || roadtripStay) && <VisitControls endDay={roadtripEndDay} stay={roadtripStay} />}
           {(place.description || googleDetails?.summary) && (
             <div className="collab-note-md bg-surface-hover text-content-muted" style={{ borderRadius: 10, overflow: 'hidden', flexShrink: 0, fontSize: 'calc(12px * var(--fs-scale-body, 1))', lineHeight: '1.5', padding: '8px 12px', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
               <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownLinkComponents}>{place.description || googleDetails?.summary || ''}</Markdown>
@@ -499,8 +519,14 @@ export default function PlaceInspector({
           {mode === 'collection' && collectionStatus && onSetStatus && (
             <StatusBadge status={collectionStatus} onChange={onSetStatus} t={t} />
           )}
-          {/* Trip mode — day assignment */}
-          {mode === 'trip' && !!selectedDayId && (
+          {/* Trip mode — day assignment.
+              A stop a lodging booking put there is not offered either way. Taking it off
+              the day would leave the booking behind with nothing on the drive and no way
+              back short of saving it again, and putting a second one beside it is the
+              duplicate the stop exists to prevent. The booking is removed where it is
+              made: in the day's overnight block, or by turning the night back into a
+              pause in road trip mode. */}
+          {mode === 'trip' && !!selectedDayId && !bookedNight && (
             assignmentInDay ? (
               <ActionButton onClick={() => onRemoveAssignment?.(selectedDayId, assignmentInDay.id)} variant="ghost" icon={<Minus size={13} />}
                 label={<span className="hidden sm:inline">{t('inspector.removeFromDay')}</span>} />
@@ -787,6 +813,17 @@ function PlaceInspectorHeader({ openNow, place, category, t, editingName, nameIn
                   className="text-content"
                   style={{ fontWeight: 600, fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', lineHeight: '1.3', cursor: onUpdatePlace ? 'text' : 'default' }}
                 >{place.name}</span>
+              )}
+              {/* Where the place came from, when it did not come from somebody
+                  typing it: a stay accepted out of their own recordings. The
+                  mark alone — the name beside it is already the place's name,
+                  and a word here would only repeat the tooltip. */}
+              {place.source === 'dawarich' && (
+                <Tooltip label={t('dawarich.place.fromDawarich')} placement="top">
+                  <span style={{ display: 'inline-flex', flexShrink: 0, overflow: 'hidden', borderRadius: 5 }}>
+                    <DawarichIcon size={16} />
+                  </span>
+                </Tooltip>
               )}
               {category && (() => {
                 const CatIcon = getCategoryIcon(category.icon)

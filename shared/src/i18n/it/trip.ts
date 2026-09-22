@@ -20,6 +20,7 @@ const trip: TranslationStrings = {
   'trip.toast.placeDeleted': 'Luogo eliminato',
   'trip.toast.selectDay': 'Seleziona prima un giorno',
   'trip.toast.assignedToDay': 'Luogo assegnato al giorno',
+  'trip.toast.loadError': 'Impossibile caricare il viaggio',
   'trip.toast.reorderError': 'Impossibile riordinare',
   'trip.toast.reservationUpdated': 'Prenotazione aggiornata',
   'trip.toast.reservationAdded': 'Prenotazione aggiunta',
@@ -63,6 +64,7 @@ const trip: TranslationStrings = {
   'transit.search': 'Cerca',
   'transit.searching': 'Ricerca in corso…',
   'transit.searchError': 'Ricerca del percorso non riuscita. Riprova.',
+  'transit.noResultsVia': 'Nessun collegamento trovato tramite {provider}. Prova un altro orario o altri filtri.',
   'transit.noResults': 'Nessun collegamento trovato. Prova un altro orario o filtri.',
   'transit.direct': 'Diretto',
   'transit.transfers': '{count} cambi',
@@ -86,5 +88,7 @@ const trip: TranslationStrings = {
   'transit.transfersLabel': 'Cambi',
   'transit.walkLabel': 'A piedi',
   'transit.searchHint': 'Cerca collegamenti reali e aggiungili direttamente alla giornata — dati via Transitous.',
+  'trip.confirm.deletePlaceNight': 'La notte prenotata a «{name}» va via con il luogo.',
+  'trip.confirm.deletePlaceBooked': 'La notte prenotata a «{name}» va via con il luogo, insieme alla prenotazione «{booking}» e a ogni spesa collegata.',
 };
 export default trip;

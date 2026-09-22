@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { SUPPORTED_LANGUAGE_CODES } from '@trek/shared';
-import { parseDurationMs } from './parsers';
+import { parseDurationMs, parseLinkLocalAllowList } from './parsers';
 
 /** Present-but-malformed fails; unset/blank always passes (defaults apply). */
 function optionalWith(test: (v: string) => boolean, message: string) {
@@ -74,6 +74,11 @@ export const envSchema = z.object({
   HSTS_INCLUDE_SUBDOMAINS: boolStr,
   TRUST_PROXY: integer(0, 2 ** 31, 'must be an integer (number of trusted proxy hops)'),
   ALLOW_INTERNAL_NETWORK: boolStr,
+  ALLOW_LINK_LOCAL_IPS: optionalWith(
+    (v) => parseLinkLocalAllowList(v).invalid.length === 0,
+    'must be a comma-separated list of IPv4 addresses in 169.254.0.0/16, such as 169.254.1.2; ' +
+      '169.254.169.x and 169.254.170.x (cloud metadata) cannot be listed',
+  ),
   IDEMPOTENCY_TTL_SECONDS: positiveNumber,
 
   // OIDC
@@ -108,6 +113,7 @@ export const envSchema = z.object({
   // Integrations
   UNSPLASH_ACCESS_KEY: anyString,
   TRANSIT_API_URL: url,
+  NOMINATIM_URL: url,
   // OVERPASS_URL accepts a comma-separated endpoint list and silently drops
   // non-http(s) entries today — left unvalidated to keep that behavior.
   OVERPASS_URL: anyString,
@@ -152,7 +158,12 @@ export const envSchema = z.object({
   ADMIN_PASSWORD: anyString,
   TREK_MANAGED: boolStr,
   PLACES_API_BASE: url,
+  TREK_PLACES_URL: url,
+  TREK_PLACES_ENABLED: boolStr,
   PLACES_API_KEY: anyString,
+  AMAP_API_BASE: url,
+  AMAP_API_KEY: anyString,
+  AMAP_API_SECRET: anyString,
   MAPBOX_ACCESS_TOKEN: anyString,
   CARTO_API_KEY: anyString,
   DEMO_MODE: boolStr,

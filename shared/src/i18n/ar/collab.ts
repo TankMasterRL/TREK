@@ -12,6 +12,17 @@ const collab: TranslationStrings = {
   'collab.tabs.chat': 'الدردشة',
   'collab.tabs.notes': 'الملاحظات',
   'collab.tabs.polls': 'الاستطلاعات',
+  'collab.tabs.links': 'الروابط',
+  'collab.links.add': 'إضافة رابط',
+  'collab.chat.imageRejected': 'يُسمح فقط بصور JPEG وPNG وGIF وWebP حتى 10 ميغابايت',
+  'collab.links.cancel': 'إلغاء',
+  'collab.links.save': 'حفظ الرابط',
+  'collab.links.titlePlaceholder': 'عنوان الرابط',
+  'collab.links.urlPlaceholder': 'https://...',
+  'collab.links.empty': 'لا توجد روابط مشتركة بعد',
+  'collab.links.pin': 'تثبيت الرابط',
+  'collab.links.unpin': 'إلغاء تثبيت الرابط',
+  'collab.links.delete': 'حذف الرابط',
   'collab.whatsNext.title': 'ما التالي',
   'collab.whatsNext.today': 'اليوم',
   'collab.whatsNext.tomorrow': 'غدًا',
@@ -82,5 +93,10 @@ const collab: TranslationStrings = {
   'collab.polls.delete': 'حذف',
   'collab.polls.closedSection': 'مغلق',
   'collab.notes.websitePlaceholder': 'https://...', // en-fallback
+  'collab.chat.imageLimit': 'يمكنك إرفاق ما يصل إلى {max} صور لكل رسالة',
+  'collab.chat.uploading': 'جارٍ الرفع {percent}%',
+  'collab.chat.attachImages': 'إرفاق صور',
+  'collab.chat.attachedImage': 'صورة مرفقة',
+  'collab.chat.closeImage': 'إغلاق الصورة',
 };
 export default collab;

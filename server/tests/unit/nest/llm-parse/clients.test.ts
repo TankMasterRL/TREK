@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const { safeFetchLlmMock } = vi.hoisted(() => ({ safeFetchLlmMock: vi.fn() }));
 vi.mock('../../../../src/utils/ssrfGuard', () => ({ safeFetchLlm: safeFetchLlmMock }));
 
-import { OpenAiCompatibleClient } from '../../../../src/nest/llm-parse/clients/openai-compatible.client';
+import { OpenAiCompatibleClient, UnreadableLlmResponse } from '../../../../src/nest/llm-parse/clients/openai-compatible.client';
 import { AnthropicClient } from '../../../../src/nest/llm-parse/clients/anthropic.client';
 import type { LlmExtractionInput } from '../../../../src/nest/llm-parse/llm-provider.interface';
 import { readEnv } from '../../../../src/app-config';
@@ -65,9 +65,56 @@ describe('OpenAiCompatibleClient', () => {
     expect(out).toEqual([{ '@type': 'LodgingReservation', checkinTime: '2026-08-28T00:00:00', price: 146.25 }]);
   });
 
-  it('returns [] on malformed content', async () => {
-    mockFetch(() => jsonResponse({ choices: [{ message: { content: 'not json' } }] }));
-    expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
+  /*
+   * Prose and an honest empty list both came back as `[]`, so a provider that
+   * answered neither JSON nor a reservation looked exactly like a document
+   * holding no booking: no item, no warning, nothing in the log (#2375). Only
+   * what nothing could read throws — a parsed answer that simply holds no
+   * reservation keeps the old empty path.
+   */
+  it('throws on content the lenient parser cannot read (#2375)', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: 'I could not find a booking in this document.' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/did not answer with JSON/);
+
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '42' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/did not answer with JSON/);
+  });
+
+  it('throws when the response carries no content at all (#2375)', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/empty response/);
+
+    // A content filter or a zero-token completion leaves the field off entirely.
+    mockFetch(() => jsonResponse({ choices: [{ message: {} }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/empty response/);
+  });
+
+  it('still answers empty for a document that genuinely holds no booking', async () => {
+    for (const content of ['[]', '{"reservations":[]}', '{}', '{"reservations":null}', JSON.stringify('{"reservations":[]}')]) {
+      mockFetch(() => jsonResponse({ choices: [{ message: { content } }] }));
+      expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
+    }
+  });
+
+  it('keeps the unreadable response out of the message on a managed instance', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: 'Booking for Jane Doe, 12 Rue de Rivoli' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/Jane Doe/);
+
+    // The response is the booking, and on a managed install the operator's log
+    // is not the place for it — same split as the extracted text.
+    vi.stubEnv('TREK_MANAGED', 'true');
+    try {
+      await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/did not answer with JSON$/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reads a single reservation the model answered on its own', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '{"@type":"LodgingReservation","reservationNumber":"733"}' } }] }));
+    expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([
+      { '@type': 'LodgingReservation', reservationNumber: '733' },
+    ]);
   });
 
   it('throws on non-2xx', async () => {
@@ -187,12 +234,37 @@ describe('OpenAiCompatibleClient', () => {
     expect(second.response_format.type).toBe('json_object');
   });
 
-  it('throws when the json_object retry also fails (400 twice)', async () => {
+  /*
+   * A provider behind a proxy that supports neither grammar rejected both rungs
+   * and the import failed hard, which is what `drop_params` on the proxy side was
+   * being used to work around (#2375). The last attempt sends the request the
+   * proxy would have produced.
+   */
+  it('drops response_format entirely once json_schema and json_object are both refused (#2375)', async () => {
     safeFetchLlmMock
       .mockResolvedValueOnce(jsonResponse({ error: 'no json_schema' }, false, 400))
-      .mockResolvedValueOnce(jsonResponse({ error: 'no json_object either' }, false, 400));
+      .mockResolvedValueOnce(jsonResponse({ error: 'no json_object either' }, false, 400))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: '{"reservations":[{"@type":"FlightReservation"}]}' } }] }));
+    const out = await new OpenAiCompatibleClient().extract(baseInput);
+    expect(out).toEqual([{ '@type': 'FlightReservation' }]);
+    expect(safeFetchLlmMock).toHaveBeenCalledTimes(3);
+
+    const bodies = safeFetchLlmMock.mock.calls.map(c => JSON.parse((c[1] as RequestInit).body as string));
+    expect(bodies[0].response_format.type).toBe('json_schema');
+    expect(bodies[1].response_format).toEqual({ type: 'json_object' });
+    expect('response_format' in bodies[2]).toBe(false);
+    // Only the grammar goes; the prompt, the model and the token cap are untouched.
+    expect(bodies[2].messages).toEqual(bodies[0].messages);
+    expect(bodies[2].max_tokens).toBe(4096);
+  });
+
+  it('throws when the attempt without response_format also fails (400 three times)', async () => {
+    safeFetchLlmMock
+      .mockResolvedValueOnce(jsonResponse({ error: 'no json_schema' }, false, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: 'no json_object either' }, false, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: 'nothing this model accepts' }, false, 400));
     await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/400/);
-    expect(safeFetchLlmMock).toHaveBeenCalledTimes(2);
+    expect(safeFetchLlmMock).toHaveBeenCalledTimes(3);
   });
 
   it('does not retry the NuExtract path on 400', async () => {
@@ -255,6 +327,17 @@ describe('OpenAiCompatibleClient — NuExtract path', () => {
     expect(body.response_format).toBeUndefined();
   });
 
+  it('throws when NuExtract answered something nothing could read (#2375)', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: 'I am NuExtract, a template filling model.' } }] }));
+    await expect(
+      new OpenAiCompatibleClient().extract({ ...baseInput, model: 'nuextract', text: 'Hotel doc' }),
+    ).rejects.toThrow(/did not answer with JSON/);
+
+    // A template that came back filled with nothing is still an answer.
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '{"type":null,"name":null}' } }] }));
+    expect(await new OpenAiCompatibleClient().extract({ ...baseInput, model: 'nuextract', text: 'Hotel doc' })).toEqual([]);
+  });
+
   it('keeps the system prompt and response_format for non-NuExtract models', async () => {
     const fetchFn = mockFetch(() => jsonResponse({ choices: [{ message: { content: '{"reservations":[]}' } }] }));
     await new OpenAiCompatibleClient().extract({ ...baseInput, model: 'qwen2.5:7b' });
@@ -302,6 +385,38 @@ describe('AnthropicClient', () => {
   it('still answers empty when the tool input really is not a list', async () => {
     mockFetch(() =>
       jsonResponse({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'emit_reservations', input: { reservations: 'no bookings in this document' } }] }),
+    );
+    expect(await new AnthropicClient().extract(baseInput)).toEqual([]);
+  });
+
+  /*
+   * A forced tool that was never called, and a run that stopped at the cap with a
+   * fragment of one, both came back as [] — so a long voucher reached the person
+   * as "no reservations found", with an empty warnings array and nothing in the
+   * log. That is the #2375 symptom on the provider the dropdown offers first, so
+   * the same rule applies here: only what the client could read is an answer.
+   */
+  it('throws when the answer was cut off at the token cap (#2375)', async () => {
+    mockFetch(() =>
+      jsonResponse({ stop_reason: 'max_tokens', content: [{ type: 'tool_use', name: 'emit_reservations', input: {} }] }),
+    );
+    await expect(new AnthropicClient().extract(baseInput)).rejects.toThrow(/cut off at the 8192-token limit/);
+  });
+
+  it('throws when the forced tool was never called (#2375)', async () => {
+    mockFetch(() =>
+      jsonResponse({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'I could not find a booking in this document.' }] }),
+    );
+    await expect(new AnthropicClient().extract(baseInput)).rejects.toThrow(/without calling emit_reservations/);
+
+    // A response carrying no content block at all lands on the same message.
+    mockFetch(() => jsonResponse({ stop_reason: 'end_turn' }));
+    await expect(new AnthropicClient().extract(baseInput)).rejects.toThrow(/without calling emit_reservations/);
+  });
+
+  it('still answers empty for a tool call that carries an empty list', async () => {
+    mockFetch(() =>
+      jsonResponse({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'emit_reservations', input: { reservations: [] } }] }),
     );
     expect(await new AnthropicClient().extract(baseInput)).toEqual([]);
   });
@@ -437,8 +552,24 @@ describe('OpenAiCompatibleClient — the response token cap (LLM_MAX_TOKENS)', (
  */
 describe('OpenAiCompatibleClient — a truncated reply (finish_reason: length)', () => {
   it('explains the cap when nothing survived the truncation', async () => {
+    // The fragment breaks off mid-object, so readAnswer sees it as unreadable
+    // (#2375) — but the cap is the cause, and the cap is what gets named.
     mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[{"@ty' } }] }));
     await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/LLM_MAX_TOKENS/);
+  });
+
+  it('raises it as UnreadableLlmResponse, so both callers keep their #2375 handling', async () => {
+    // A truncated answer is still one nobody could read. The booking import
+    // warns on the file either way; the plugin surface swallows exactly this
+    // type, so a different one would turn a cut-off reply into a HOST_ERROR
+    // for plugins that have always seen an empty answer.
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[{"@ty' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(UnreadableLlmResponse);
+
+    // Same type for the readable-but-empty half, so the two branches cannot
+    // drift into telling an operator different things about the same cause.
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'length', message: { content: '{"reservations":[]}' } }] }));
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(UnreadableLlmResponse);
   });
 
   it('keeps what did parse, rather than discarding a partial answer', async () => {
@@ -453,11 +584,21 @@ describe('OpenAiCompatibleClient — a truncated reply (finish_reason: length)',
     warn.mockRestore();
   });
 
-  it('leaves an ordinary empty answer alone (finish_reason stop, or absent)', async () => {
-    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'not json' } }] }));
+  it('leaves a document that genuinely holds no booking alone (finish_reason stop, or absent)', async () => {
+    mockFetch(() => jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: '{"reservations":[]}' } }] }));
     expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
-    mockFetch(() => jsonResponse({ choices: [{ message: { content: 'not json' } }] }));
+    mockFetch(() => jsonResponse({ choices: [{ message: { content: '{"reservations":[]}' } }] }));
     expect(await new OpenAiCompatibleClient().extract(baseInput)).toEqual([]);
+  });
+
+  it('leaves #2375 its own diagnosis when the reply was not truncated', async () => {
+    // The boundary between the two: prose from a model that ran to a natural
+    // stop is #2375's case, and blaming the cap for it would send an operator
+    // after the wrong setting.
+    mockFetch(() =>
+      jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'I could not find a booking.' } }] }),
+    );
+    await expect(new OpenAiCompatibleClient().extract(baseInput)).rejects.toThrow(/did not answer with JSON/);
   });
 });
 
