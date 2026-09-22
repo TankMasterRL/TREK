@@ -1,4 +1,4 @@
-// FE-ADMIN-ADDON-001 to FE-ADMIN-ADDON-037
+// FE-ADMIN-ADDON-001 to FE-ADMIN-ADDON-039
 import { render, screen, waitFor } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
@@ -37,9 +37,11 @@ function llmAddon(config: Record<string, unknown> = {}) {
   });
 }
 
-function modelsRoute(names: string[], seen?: (string | null)[]) {
+function modelsRoute(names: string[], seen?: (string | null)[], seenProviders?: (string | null)[]) {
   return http.get('/api/admin/llm/local/models', ({ request }) => {
-    seen?.push(new URL(request.url).searchParams.get('baseUrl'));
+    const params = new URL(request.url).searchParams;
+    seen?.push(params.get('baseUrl'));
+    seenProviders?.push(params.get('provider'));
     return HttpResponse.json({ models: names.map(name => ({ name, size: 1 })) });
   });
 }
@@ -635,7 +637,7 @@ describe('AddonManager', () => {
     await user.tab();
     await waitFor(() => expect(urls).toContain('http://ollama.lan:11434/v1'));
 
-    await user.click(screen.getByRole('button', { name: /Local · OpenAI-compatible/ }));
+    await user.click(screen.getByRole('button', { name: /Local · Ollama/ }));
     await user.click(screen.getByRole('button', { name: 'OpenAI' }));
     expect(screen.getByPlaceholderText('https://api.openai.com/v1')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('gpt-4o')).toBeInTheDocument();
@@ -676,7 +678,7 @@ describe('AddonManager', () => {
     expect(screen.getByText('starting…')).toBeInTheDocument();
 
     await screen.findByText('Model pulled');
-    expect(pulled).toEqual({ baseUrl: 'http://localhost:11434/v1', model: 'qwen3.5:4b' });
+    expect(pulled).toEqual({ baseUrl: 'http://localhost:11434/v1', model: 'qwen3.5:4b', provider: 'local' });
     expect(screen.getByPlaceholderText('select or pull below')).toHaveValue('qwen3.5:4b');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Selected' })).toBeDisabled());
   });
@@ -729,7 +731,7 @@ describe('AddonManager', () => {
     await user.type(screen.getByPlaceholderText('select or pull below'), ' mistral:7b ');
     await user.type(screen.getByPlaceholderText('(often not required)'), 'sk-live');
 
-    await user.click(screen.getByRole('button', { name: /Local · OpenAI-compatible/ }));
+    await user.click(screen.getByRole('button', { name: /Local · Ollama/ }));
     await user.click(screen.getByRole('button', { name: 'OpenAI' }));
     expect(screen.getByPlaceholderText('sk-…')).toHaveValue('sk-live');
 
@@ -756,7 +758,7 @@ describe('AddonManager', () => {
 
     await screen.findByText('Installed on the server');
 
-    await user.click(screen.getByRole('button', { name: /Local · OpenAI-compatible/ }));
+    await user.click(screen.getByRole('button', { name: /Local · Ollama/ }));
     await user.click(screen.getByRole('button', { name: 'Anthropic' }));
     await user.type(screen.getByPlaceholderText('claude-opus-4-8'), 'claude-haiku-4-5-20251001');
     await user.type(screen.getByPlaceholderText('sk-…'), 'sk-ant-live');
@@ -788,6 +790,59 @@ describe('AddonManager', () => {
     expect(screen.queryByText('Model pulled')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pull' })).toBeEnabled());
     expect(screen.queryByText('Pulling…')).not.toBeInTheDocument();
+  });
+
+  it('FE-ADMIN-ADDON-038: LM Studio lists its own models, offers a Pull, and saves its own endpoint', async () => {
+    const user = userEvent.setup();
+    const urls: (string | null)[] = [];
+    const providers: (string | null)[] = [];
+    const bodies: unknown[] = [];
+    server.use(
+      addonsRoute([llmAddon({ provider: 'lmstudio', model: '', baseUrl: '', apiKey: '', multimodal: false })]),
+      modelsRoute(['qwen3-8b'], urls, providers),
+      http.put('/api/admin/addons/llm_parsing', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    render(<><ToastContainer /><AddonManager /></>);
+
+    // Asked at LM Studio's own default port, and told which server it is talking to —
+    // the two speak different management APIs.
+    await screen.findByText('Installed on the server');
+    await waitFor(() => expect(urls).toEqual(['http://localhost:1234/v1']));
+    expect(providers).toEqual(['lmstudio']);
+
+    // A model list AND a Pull: LM Studio's native v1 REST API downloads models, so the
+    // panel offers the recommended one under the id LM Studio downloads it by.
+    await user.click(await screen.findByRole('button', { name: 'qwen3-8b' }));
+    expect(screen.getByText('Pull a recommended model')).toBeInTheDocument();
+    expect(screen.getByTitle(/Recommended/).textContent).toContain('Qwen3.5 — 4B');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved');
+    expect(bodies[0]).toEqual({
+      config: { provider: 'lmstudio', model: 'qwen3-8b', baseUrl: '', apiKey: '', multimodal: false },
+    });
+  });
+
+  it('FE-ADMIN-ADDON-039: switching between the two local servers re-asks the right one', async () => {
+    const user = userEvent.setup();
+    const urls: (string | null)[] = [];
+    const providers: (string | null)[] = [];
+    server.use(addonsRoute([llmAddon({ provider: 'local' })]), modelsRoute([], urls, providers));
+    render(<AddonManager />);
+
+    await screen.findByText('Installed on the server');
+    await waitFor(() => expect(providers).toEqual(['local']));
+
+    await user.click(screen.getByRole('button', { name: /Local · Ollama/ }));
+    await user.click(screen.getByRole('button', { name: /Local · LM Studio/ }));
+
+    // The placeholder default follows the provider, so an admin who never typed an
+    // endpoint is not pointed at the other server's port.
+    await waitFor(() => expect(providers).toEqual(['local', 'lmstudio']));
+    expect(urls).toEqual(['http://localhost:11434/v1', 'http://localhost:1234/v1']);
   });
 
   it('FE-ADMIN-ADDON-028: blurring the base URL under a cloud provider queries no local models', async () => {

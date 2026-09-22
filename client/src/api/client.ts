@@ -614,20 +614,27 @@ export const adminApi = {
     apiClient.put(`/admin/plugins/${id}/egress-hosts`, { hosts }).then(r => r.data),
   pluginErrors: (id: string) => apiClient.get(`/admin/plugins/${id}/errors`).then(r => r.data),
   pluginAudit: (id: string) => apiClient.get(`/admin/plugins/${id}/audit`).then(r => r.data),
-  // Local LLM (Ollama) management for the AI-parsing addon.
-  llmLocalModels: (baseUrl: string): Promise<{ models: { name: string; size: number }[] }> =>
-    apiClient.get('/admin/llm/local/models', { params: { baseUrl } }).then(r => r.data),
-  /** Pull a model, streaming Ollama's NDJSON progress to `onProgress`. */
+  /**
+   * Self-hosted LLM server management for the AI-parsing addon. `provider` says which
+   * server answers ('local' = Ollama, 'lmstudio' = LM Studio); the server defaults to
+   * Ollama when it is omitted.
+   */
+  llmLocalModels: (baseUrl: string, provider?: string): Promise<{ models: { name: string; size: number }[] }> =>
+    apiClient.get('/admin/llm/local/models', { params: { baseUrl, provider } }).then(r => r.data),
+  /** Download a model, streaming NDJSON progress lines to `onProgress`. Both self-hosted
+   *  servers report through the same lines — Ollama streams them itself, and the server
+   *  translates LM Studio's v1 download job into them. */
   llmLocalPull: async (
     baseUrl: string,
     model: string,
     onProgress: (p: { status?: string; total?: number; completed?: number; error?: string }) => void,
+    provider?: string,
   ): Promise<void> => {
     const res = await fetch('/api/admin/llm/local/pull', {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ baseUrl, model }),
+      body: JSON.stringify({ baseUrl, model, provider }),
     })
     if (!res.ok) {
       let msg = `Pull failed (${res.status})`

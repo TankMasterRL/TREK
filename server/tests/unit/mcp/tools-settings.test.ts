@@ -49,6 +49,7 @@ import { MASKED_SETTING_VALUE } from '@trek/shared';
 import { DISPLAY_PREFERENCE_KEYS } from '../../../src/nest/settings/settings.mcp';
 import { MANAGED_LOCKED_SETTING_KEYS } from '../../../src/nest/common/managed';
 import { isAdminOnlyEndpointSetting, ENCRYPTED_SETTING_KEYS, MASKED_SETTING_KEYS } from '../../../src/nest/settings/settings.service';
+import { SELF_HOSTED_LLM_PROVIDERS } from '../../../src/nest/llm-parse/llm-config';
 
 beforeAll(() => {
   createTables(testDb);
@@ -495,9 +496,11 @@ describe('Display-preference allow-list', () => {
 
   it('holds no key assertMayWriteInstanceEndpoint would have to refuse', () => {
     // isAdminOnlyEndpointSetting is value-dependent, so probe it with the values
-    // that trip it rather than matching on the key name.
+    // that trip it rather than matching on the key name — and with the live
+    // self-hosted list, so a provider added later is probed too.
+    const probes: unknown[] = ['http://127.0.0.1:11434', ...SELF_HOSTED_LLM_PROVIDERS];
     const offenders = DISPLAY_PREFERENCE_KEYS.filter((key) =>
-      isAdminOnlyEndpointSetting(key, 'http://127.0.0.1:11434') || isAdminOnlyEndpointSetting(key, 'local'));
+      probes.some(value => isAdminOnlyEndpointSetting(key, value)));
     expect(offenders).toEqual([]);
   });
 

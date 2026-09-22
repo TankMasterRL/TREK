@@ -139,7 +139,7 @@ Most of what follows is an addon an admin switches on or off. Lists, Costs, Docu
 - **Reach**: create trips and days, edit places, packing lists, to-dos, costs, reservations, collections and journeys, mark countries visited, all inside the scopes the token holds
 - **Prompts**: `trip-summary`, plus `packing-list` and `budget-overview` when those addons are on
 - **Addon-aware**: seven addon gates decide which tools and resources a session sees. Flipping one drops live sessions so the surface re-registers
-- **Booking extraction** (off by default): read a confirmation with a local Ollama server, any OpenAI-compatible endpoint, or Anthropic, configured instance-wide or per user
+- **Booking extraction** (off by default): read a confirmation with a local Ollama or LM Studio server, any OpenAI-compatible endpoint, or Anthropic, configured instance-wide or per user
 
 </td>
 </tr>

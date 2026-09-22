@@ -357,7 +357,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    "Un punt final local (Ollama) es configura una sola vegada per a tota la instància a la configuració d'administració. Aquí encara pots fer servir la teva pròpia clau d'OpenAI o d'Anthropic.",
+    "Un punt final local (Ollama o LM Studio) es configura una sola vegada per a tota la instància a la configuració d'administració. Aquí encara pots fer servir la teva pròpia clau d'OpenAI o d'Anthropic.",
   'settings.aiParsing.model': 'Model',
   'settings.aiParsing.baseUrl': 'URL base',
   'settings.aiParsing.baseUrlHint':

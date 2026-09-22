@@ -66,7 +66,7 @@ describe('LlmConnectionSection', () => {
     // The endpoint is instance configuration since #1772, so it has no field here.
     expect(screen.queryByPlaceholderText('http://localhost:11434')).not.toBeInTheDocument();
     expect(
-      screen.getByText('A local (Ollama) endpoint is set up once for the whole instance in the admin settings. You can still use your own OpenAI or Anthropic key here.'),
+      screen.getByText('A local endpoint (Ollama or LM Studio) is set up once for the whole instance in the admin settings. You can still use your own OpenAI or Anthropic key here.'),
     ).toBeInTheDocument();
   });
 
@@ -160,6 +160,15 @@ describe('LlmConnectionSection', () => {
 
     expect(screen.getByRole('button', { name: /OpenAI/ })).toBeInTheDocument();
     expect(screen.queryByDisplayValue('http://192.168.1.5:11434')).not.toBeInTheDocument();
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('FE-COMP-LLM-010b: a stored LM Studio provider falls back the same way — it names an endpoint too', () => {
+    const updateSettings = seedLlm({ llm_provider: 'lmstudio', llm_model: 'qwen3-8b', llm_base_url: 'http://192.168.1.5:1234' });
+    renderSection();
+
+    expect(screen.getByRole('button', { name: /OpenAI/ })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('http://192.168.1.5:1234')).not.toBeInTheDocument();
     expect(updateSettings).not.toHaveBeenCalled();
   });
 
