@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { decrypt_api_key, maybe_encrypt_api_key } from '../common/crypto/apiKeyCrypto';
 import { MASKED_SETTING_VALUE, normalizeAppearance } from '@trek/shared';
+import { LLM_PROVIDERS, isEndpointLlmProvider } from '../llm-parse/llm-config';
 import { readEnv } from '../../app-config';
 
 /**
@@ -85,7 +86,9 @@ const VALID_VALUES: Partial<Record<DefaultableKey, unknown[]>> = {
   time_format: ['12h', '24h'],
   dark_mode: [true, false, 'light', 'dark', 'auto'],
   map_provider: ['leaflet', 'mapbox-gl', 'maplibre-gl'],
-  llm_provider: ['local', 'openai', 'anthropic'],
+  // Read from the provider list itself — a hand-typed copy here would silently
+  // reject a provider the rest of the server already supports.
+  llm_provider: [...LLM_PROVIDERS],
 };
 
 const BOOLEAN_KEYS = new Set<DefaultableKey>(['blur_booking_codes', 'mapbox_3d_enabled', 'mapbox_quality_mode', 'llm_multimodal']);
@@ -94,10 +97,11 @@ const BOOLEAN_KEYS = new Set<DefaultableKey>(['blur_booking_codes', 'mapbox_3d_e
  * Per-user settings that name an address, which a non-admin must not write.
  *
  * #1772 for the LLM pair: both pick where this server sends its own LLM
- * requests (provider 'local' means nothing but "an endpoint I name"), and the
- * SSRF guard in front of those requests allows loopback and LAN on purpose so a
- * self-hosted Ollama works. Only whoever runs the instance can judge what is
- * reachable from it.
+ * requests (an endpoint provider — 'local', 'anthropic-compatible' — means
+ * nothing but "an endpoint I name"), and the SSRF guard in front of those
+ * requests allows loopback and LAN on purpose so a self-hosted Ollama or a LAN
+ * gateway works. Only whoever runs the instance can judge what is reachable
+ * from it.
  *
  * `routing_base_url` (#1797) is the same class for a different reason: it names
  * an origin the BROWSER connects to, so it has to appear in the CSP
@@ -115,7 +119,7 @@ export function isAdminOnlyEndpointSetting(key: string, value: unknown): boolean
   if (key === 'llm_base_url' || key === 'routing_base_url' || key === 'valhalla_base_url') {
     return typeof value === 'string' && value.trim() !== '';
   }
-  if (key === 'llm_provider') return value === 'local';
+  if (key === 'llm_provider') return isEndpointLlmProvider(value);
   return false;
 }
 

@@ -80,6 +80,19 @@ describe('LlmParseService', () => {
     expect(extractText).not.toHaveBeenCalled();
   });
 
+  it('sends a pdf to an Anthropic-compatible endpoint as text by default, natively only when multimodal', async () => {
+    extractText.mockResolvedValue('Hotel X');
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'anthropic-compatible', baseUrl: 'http://gw' }));
+    await svc().parse(file('a.pdf', '%PDF'), 1);
+    expect(extract.mock.calls[0][0].text).toBe('Hotel X');
+    expect(extract.mock.calls[0][0].file).toBeUndefined();
+
+    resolveLlmConfig.mockReturnValue(cfg({ provider: 'anthropic-compatible', baseUrl: 'http://gw', multimodal: true }));
+    await svc().parse(file('a.pdf', '%PDF'), 1);
+    expect(extract.mock.calls[1][0].file).toEqual({ mimeType: 'application/pdf', data: expect.any(Buffer) });
+    expect(extract.mock.calls[1][0].text).toBeUndefined();
+  });
+
   it('warns when a pdf yields no readable text (e.g. a scan)', async () => {
     extractText.mockResolvedValue('   ');
     const res = await svc().parse(file('a.pdf', '%PDF'), 1);

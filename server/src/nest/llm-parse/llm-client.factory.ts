@@ -6,12 +6,15 @@ import { AnthropicClient } from './clients/anthropic.client';
 /**
  * Pick the provider client for a resolved config.
  *  - 'anthropic'        → Anthropic Messages API client
+ *  - 'anthropic-compatible' → the same client, at the configured base URL
  *  - 'openai' | 'local' → OpenAI-compatible client (cloud or local base URL)
  */
 export function createLlmClient(config: ResolvedLlmConfig): LlmExtractionClient {
   switch (config.provider) {
     case 'anthropic':
       return new AnthropicClient();
+    case 'anthropic-compatible':
+      return new AnthropicClient({ compatible: true });
     case 'openai':
     case 'local':
       return new OpenAiCompatibleClient();

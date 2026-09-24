@@ -36,7 +36,7 @@ export class SettingsController {
   /**
    * #1772: the write half of the rule that the endpoint is instance
    * configuration. There is no key allow-list on this route, so anyone could
-   * otherwise park an `llm_base_url` (or `llm_provider: 'local'`) in their own
+   * otherwise park an `llm_base_url` (or an endpoint `llm_provider` such as `'local'`) in their own
    * settings row. The resolver ignores such a row anyway; refusing it here
    * means the caller finds out instead of silently saving something that never
    * takes effect.
@@ -62,7 +62,7 @@ export class SettingsController {
   @Put()
   upsert(@CurrentUser() user: User, @Body() body: SettingUpsertDto) {
     this.assertMayWriteInstanceEndpoint({ [body.key]: body.value });
-    // assertMayWriteInstanceEndpoint only covers llm_base_url and provider 'local'.
+    // assertMayWriteInstanceEndpoint only covers llm_base_url and the endpoint providers.
     // llm_api_key and llm_model are writable by every user, and on a managed
     // install both cost the operator money, so the key list decides here.
     if (isManagedLockedKey(body.key) && this.env.isManaged()) {

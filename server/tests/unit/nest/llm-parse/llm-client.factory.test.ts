@@ -12,6 +12,10 @@ describe('createLlmClient', () => {
     expect(createLlmClient(cfg('anthropic'))).toBeInstanceOf(AnthropicClient);
   });
 
+  it('returns the Anthropic client for an Anthropic-compatible endpoint too', () => {
+    expect(createLlmClient(cfg('anthropic-compatible'))).toBeInstanceOf(AnthropicClient);
+  });
+
   it('returns the OpenAI-compatible client for openai and local', () => {
     expect(createLlmClient(cfg('openai'))).toBeInstanceOf(OpenAiCompatibleClient);
     expect(createLlmClient(cfg('local'))).toBeInstanceOf(OpenAiCompatibleClient);

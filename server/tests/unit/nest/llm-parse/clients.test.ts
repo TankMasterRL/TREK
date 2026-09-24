@@ -468,3 +468,49 @@ describe('the abort deadline comes from the configured ceiling (#2230)', () => {
     expect(spy).toHaveBeenCalledWith(expect.any(Function), readEnv().integrations.llmTimeoutMs);
   });
 });
+
+describe('AnthropicClient — Anthropic-compatible endpoints', () => {
+  const toolAnswer = () =>
+    jsonResponse({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'emit_reservations', input: { reservations: [{ '@type': 'FlightReservation' }] } }] });
+
+  it('posts to {baseUrl}/v1/messages and sends the key both as x-api-key and as a Bearer token', async () => {
+    const fetchFn = mockFetch(() => toolAnswer());
+    const out = await new AnthropicClient({ compatible: true }).extract({ ...baseInput, baseUrl: 'https://gateway.example.com/anthropic/', apiKey: 'k-1' });
+    expect(out).toEqual([{ '@type': 'FlightReservation' }]);
+    expect(fetchFn.mock.calls[0][0]).toBe('https://gateway.example.com/anthropic/v1/messages');
+    const headers = (fetchFn.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers['x-api-key']).toBe('k-1');
+    expect(headers.authorization).toBe('Bearer k-1');
+    expect(headers['anthropic-version']).toBe('2023-06-01');
+  });
+
+  it('accepts a base URL pasted with /v1 without doubling it', async () => {
+    const fetchFn = mockFetch(() => toolAnswer());
+    await new AnthropicClient({ compatible: true }).extract({ ...baseInput, baseUrl: 'http://litellm:4000/v1' });
+    expect(fetchFn.mock.calls[0][0]).toBe('http://litellm:4000/v1/messages');
+    // No key configured: no Bearer header either.
+    const headers = (fetchFn.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.authorization).toBeUndefined();
+  });
+
+  it('names the compatible endpoint in a failure, and keeps the official client Bearer-free', async () => {
+    mockFetch(() => jsonResponse({ error: 'bad key' }, false, 401));
+    await expect(new AnthropicClient({ compatible: true }).extract({ ...baseInput, baseUrl: 'http://gw' })).rejects.toThrow(
+      /^Anthropic-compatible endpoint request failed \(401\)/,
+    );
+
+    safeFetchLlmMock.mockReset();
+    const fetchFn = mockFetch(() => toolAnswer());
+    await new AnthropicClient().extract({ ...baseInput, apiKey: 'sk-ant' });
+    expect(fetchFn.mock.calls[0][0]).toBe('https://api.anthropic.com/v1/messages');
+    const headers = (fetchFn.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.authorization).toBeUndefined();
+  });
+
+  it('names the compatible endpoint when it declines the document', async () => {
+    mockFetch(() => jsonResponse({ stop_reason: 'refusal', content: [] }));
+    await expect(new AnthropicClient({ compatible: true }).extract({ ...baseInput, baseUrl: 'http://gw' })).rejects.toThrow(
+      'Anthropic-compatible endpoint declined to process this document',
+    );
+  });
+});

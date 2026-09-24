@@ -135,4 +135,38 @@ describe('resolveLlmConfig', () => {
     expect(resolver.resolve(7)).toBeNull();
     expect(dbMock._role.get).not.toHaveBeenCalled();
   });
+
+  it('resolves an instance-wide Anthropic-compatible endpoint with its base URL', () => {
+    setInstanceConfig({ provider: 'anthropic-compatible', model: 'glm-4.6', baseUrl: ' https://gw.example.com/anthropic ', apiKey: 'k' });
+    expect(resolver.resolve(1)).toEqual({
+      provider: 'anthropic-compatible',
+      model: 'glm-4.6',
+      baseUrl: 'https://gw.example.com/anthropic',
+      apiKey: 'k',
+      multimodal: false,
+    });
+  });
+
+  it('refuses an instance-wide Anthropic-compatible config without a base URL (never falls back to api.anthropic.com)', () => {
+    setInstanceConfig({ provider: 'anthropic-compatible', model: 'glm-4.6', baseUrl: '  ', apiKey: 'k' });
+    expect(resolver.resolve(1)).toBeNull();
+  });
+
+  it('#1772: a personal Anthropic-compatible pick without the matching admin default gets no config', () => {
+    getUserSettings.mockReturnValue({ llm_provider: 'anthropic-compatible', llm_model: 'm', llm_base_url: 'http://10.0.0.5:4000' });
+    expect(resolver.resolve(7)).toBeNull();
+    // An admin default naming a different endpoint provider is not a match either.
+    getAdminUserDefaults.mockReturnValue({ llm_provider: 'local', llm_base_url: 'http://ollama:11434' });
+    expect(resolver.resolve(7)).toBeNull();
+  });
+
+  it('#1772: an admin-default Anthropic-compatible endpoint applies, and needs its base URL', () => {
+    getUserSettings.mockReturnValue({ llm_provider: 'anthropic-compatible', llm_model: 'm' });
+    getAdminUserDefaults.mockReturnValue({ llm_provider: 'anthropic-compatible', llm_base_url: 'http://litellm:4000' });
+    getDecryptedUserSetting.mockReturnValue('k-user');
+    expect(resolver.resolve(7)).toMatchObject({ provider: 'anthropic-compatible', baseUrl: 'http://litellm:4000', apiKey: 'k-user' });
+
+    getAdminUserDefaults.mockReturnValue({ llm_provider: 'anthropic-compatible' });
+    expect(resolver.resolve(7)).toBeNull();
+  });
 });

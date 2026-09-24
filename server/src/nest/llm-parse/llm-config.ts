@@ -13,7 +13,7 @@ import { maybe_encrypt_api_key, decrypt_api_key } from '../common/crypto/apiKeyC
  * per-user encrypted-settings pattern in settingsService.ts.
  */
 
-export type LlmProvider = 'local' | 'openai' | 'anthropic';
+export type LlmProvider = 'local' | 'openai' | 'anthropic' | 'anthropic-compatible';
 
 /** Fully-resolved config the clients consume. */
 export interface ResolvedLlmConfig {
@@ -33,8 +33,25 @@ export interface LlmAddonConfig {
   multimodal?: boolean;
 }
 
-export const LLM_PROVIDERS: LlmProvider[] = ['local', 'openai', 'anthropic'];
+export const LLM_PROVIDERS: LlmProvider[] = ['local', 'openai', 'anthropic', 'anthropic-compatible'];
 export const MASKED_VALUE = '••••••••';
+
+/**
+ * The providers that mean nothing but "an endpoint I name": 'local' is a
+ * self-hosted OpenAI-compatible server (Ollama & co.), 'anthropic-compatible'
+ * any server speaking the Anthropic Messages API at an address the operator
+ * gives — a gateway (LiteLLM, OpenRouter) or another vendor's Anthropic-shaped
+ * endpoint. Both are instance configuration (#1772): a personal write of one is
+ * refused, and a per-user row naming one resolves only against an admin default
+ * of the SAME provider. Every rule that asks "does this name an address" tests
+ * this list, so a further endpoint provider is one entry, not a sweep.
+ */
+export const ENDPOINT_LLM_PROVIDERS: LlmProvider[] = ['local', 'anthropic-compatible'];
+
+/** True when the provider names an operator-chosen endpoint (see above). */
+export function isEndpointLlmProvider(value: unknown): value is LlmProvider {
+  return typeof value === 'string' && (ENDPOINT_LLM_PROVIDERS as string[]).includes(value);
+}
 
 /**
  * Prepare an admin config blob for persistence: encrypt a freshly-entered apiKey,
