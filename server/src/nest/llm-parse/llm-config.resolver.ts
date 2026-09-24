@@ -1,12 +1,27 @@
 import { ADDON_IDS } from '../../addons';
 import { AddonsService } from '../addons/addons.service';
-import { decryptLlmApiKey, LLM_PROVIDERS, type LlmProvider, type ResolvedLlmConfig } from './llm-config';
+import {
+  decryptLlmApiKey,
+  isEndpointLlmProvider,
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type ResolvedLlmConfig,
+} from './llm-config';
 import { DatabaseService } from '../database/database.service';
 import { SettingsService } from '../settings/settings.service';
 import { Injectable } from '@nestjs/common';
 
 function asProvider(v: unknown): LlmProvider | null {
   return typeof v === 'string' && (LLM_PROVIDERS as string[]).includes(v) ? (v as LlmProvider) : null;
+}
+
+/**
+ * 'anthropic-compatible' has no default address to fall back on: without a base
+ * URL it would quietly go to api.anthropic.com, a different service than the one
+ * configured. Fail closed instead — no config, so the import says it is not set up.
+ */
+function hasRequiredBaseUrl(provider: LlmProvider, baseUrl: string | undefined): boolean {
+  return provider !== 'anthropic-compatible' || !!baseUrl;
 }
 
 /**
@@ -48,10 +63,12 @@ export class LlmConfigResolver {
     const provider = asProvider(cfg.provider);
     const model = typeof cfg.model === 'string' ? cfg.model.trim() : '';
     if (!provider || !model) return null;
+    const baseUrl = typeof cfg.baseUrl === 'string' && cfg.baseUrl.trim() ? cfg.baseUrl.trim() : undefined;
+    if (!hasRequiredBaseUrl(provider, baseUrl)) return null;
     return {
       provider,
       model,
-      baseUrl: typeof cfg.baseUrl === 'string' && cfg.baseUrl.trim() ? cfg.baseUrl.trim() : undefined,
+      baseUrl,
       apiKey: decryptLlmApiKey(cfg.apiKey),
       multimodal: cfg.multimodal === true,
     };
@@ -73,14 +90,16 @@ export class LlmConfigResolver {
     // (booking import and the plugin RPC surface), and the only place that also
     // catches values already sitting in the db.
     const endpoints = this.settings.getAdminUserDefaults();
-    // 'local' is an endpoint choice too ("some address I name"), so without an
-    // admin-set local endpoint there is no config at all, never a silent
-    // redirect to a different provider.
-    if (provider === 'local' && asProvider(endpoints.llm_provider) !== 'local') return null;
+    // An endpoint provider ('local', 'anthropic-compatible') is an endpoint
+    // choice too ("some address I name"), so without an admin-set endpoint of
+    // the SAME provider there is no config at all, never a silent redirect to a
+    // different provider — or to a server speaking a different API.
+    if (isEndpointLlmProvider(provider) && asProvider(endpoints.llm_provider) !== provider) return null;
     const baseUrl =
       typeof endpoints.llm_base_url === 'string' && endpoints.llm_base_url.trim()
         ? endpoints.llm_base_url.trim()
         : undefined;
+    if (!hasRequiredBaseUrl(provider, baseUrl)) return null;
 
     const apiKey = this.settings.getDecryptedUserSetting(userId, 'llm_api_key') ?? undefined;
     return {

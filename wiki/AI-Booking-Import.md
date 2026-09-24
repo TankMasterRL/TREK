@@ -18,13 +18,14 @@ So structured tickets keep being parsed the fast, deterministic way; the AI only
 
 ## Choosing a provider
 
-The addon supports three providers:
+The addon supports four providers:
 
 | Provider | Runs where | Notes |
 |----------|-----------|-------|
 | **Local (Ollama)** | Your own hardware | No booking data leaves your network. Recommended for privacy; works on CPU. |
 | **OpenAI** | OpenAI's API, or any **OpenAI-compatible** endpoint via a custom base URL | Needs an API key. |
 | **Anthropic** | Anthropic's API | Needs an API key. **Reads PDFs — including scans — natively.** |
+| **Anthropic-compatible** | Any server speaking the **Anthropic Messages API** at a base URL you name — a LiteLLM or OpenRouter gateway, or another vendor's Anthropic-shaped endpoint | Base URL required; requests go to `{Base URL}/v1/messages` (a trailing `/v1` in the URL is fine). The API key is sent both as `x-api-key` and as `Authorization: Bearer`. Receives extracted text. |
 
 > **Scanned PDFs:** Local and OpenAI-compatible models receive the document's *extracted text*. A scanned or image-only PDF has no text layer, so those providers return nothing for it. Only **Anthropic** ingests the raw PDF and can read scans.
 
@@ -34,8 +35,8 @@ When you enable the addon, a configuration panel appears directly under it in [A
 
 > *Set instance-wide config (applies to all users). Leave blank to let each user configure their own provider.*
 
-- **Provider** — Local · OpenAI-compatible, OpenAI, or Anthropic.
-- **Base URL** — shown for every provider except Anthropic. Defaults to `http://localhost:11434/v1` for a local Ollama server, or `https://api.openai.com/v1` for OpenAI. Point it at any OpenAI-compatible endpoint here.
+- **Provider** — Local · OpenAI-compatible, OpenAI, Anthropic, or Anthropic-compatible.
+- **Base URL** — shown for every provider except Anthropic. Defaults to `http://localhost:11434/v1` for a local Ollama server, or `https://api.openai.com/v1` for OpenAI. Point it at any OpenAI-compatible endpoint here. For **Anthropic-compatible** it has no default and must be filled in (e.g. `https://gateway.example.com/anthropic`); without one the provider stays unconfigured rather than falling back to Anthropic's own API.
 - **API key** — optional for a local server (`(often not required)`), required for the cloud providers. Stored **encrypted**; it is shown masked (`••••••••`) once saved, and leaving it unchanged keeps the stored key.
 - **Model** — the model id (e.g. `qwen3.5:4b`, `gpt-4o`, `claude-opus-4-8`).
 
@@ -56,9 +57,9 @@ If an admin leaves the instance config blank, each user can configure their own 
 
 > *Choose the AI model used to extract bookings from uploaded files. This applies only when your administrator has not configured a model for the whole instance.*
 
-The fields are a **Provider** (only **OpenAI** or **Anthropic** here), a **Model** id, and an **API key** that is *stored encrypted* (leave blank to keep the current key). There is no personal Base URL: the address this server calls is instance configuration, so a local (Ollama) model can only be set up by an admin on the addon, and the server answers 403 to anyone, admins included, who tries to store a personal base URL or a personal `local` provider.
+The fields are a **Provider** (only **OpenAI** or **Anthropic** here), a **Model** id, and an **API key** that is *stored encrypted* (leave blank to keep the current key). There is no personal Base URL: the address this server calls is instance configuration, so a local (Ollama) model can only be set up by an admin on the addon, and the server answers 403 to anyone, admins included, who tries to store a personal base URL or a personal `local` or `anthropic-compatible` provider — both name an address.
 
-There is also a **Send documents as images** toggle. It is stored per user, but extraction currently ignores it: only Anthropic is sent the raw PDF, every other provider always gets the extracted text.
+There is also a **Send documents as images** toggle. It is stored per user and only matters for an **Anthropic-compatible** endpoint (inherited from the admin default): with it on, PDFs go to that endpoint as native document blocks instead of extracted text — turn it on only if the endpoint accepts them. Anthropic always gets the raw PDF; every other provider always gets the extracted text.
 
 > **Precedence:** an admin instance model always wins. Personal settings only take effect when no instance-wide model is configured.
 

@@ -1,6 +1,7 @@
 import type { KiReservation } from '../booking-import/kitinerary.types';
 import { createLlmClient } from './llm-client.factory';
 import { LlmConfigResolver } from './llm-config.resolver';
+import type { ResolvedLlmConfig } from './llm-config';
 import { buildSystemPrompt, KI_RESERVATION_JSON_SCHEMA } from './llm-prompt';
 import type { LlmExtractionInput } from './llm-provider.interface';
 import { isPdf, extractText } from './text-extract';
@@ -8,6 +9,11 @@ import { routeExtraction, detectFlightNumbers } from './router/extraction-router
 import { Injectable } from '@nestjs/common';
 import { kiReservationSchema } from '@trek/shared';
 import { RuntimeEnvService } from '../app-config/runtime-env.service';
+
+/** Whether this config sends a PDF as a native document block (see parse()). */
+function sendsNativePdf(config: ResolvedLlmConfig): boolean {
+  return config.provider === 'anthropic' || (config.provider === 'anthropic-compatible' && config.multimodal);
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -52,9 +58,12 @@ export class LlmParseService {
 
     // Native PDF only for Anthropic (its document block reads text AND scans).
     // OpenAI-compatible servers (incl. Ollama/NuExtract) can't ingest PDFs/`file`
-    // parts, so every other provider gets extracted text.
+    // parts, so every other provider gets extracted text. An Anthropic-compatible
+    // endpoint speaks the same request shape, but many of them drop or refuse a
+    // `document` block, so it gets the PDF only when the config opts in with
+    // `multimodal` — extracted text otherwise, which every one of them reads.
     try {
-      if (config.provider === 'anthropic' && isPdf(file.originalName)) {
+      if (sendsNativePdf(config) && isPdf(file.originalName)) {
         input.file = { mimeType: MIME_BY_EXT['.pdf'], data: file.buffer };
         console.debug(
           `[DEBUG] Extracted (native PDF, ${file.buffer.length} bytes) sent to ${config.provider}: ${file.originalName}`,
