@@ -70,3 +70,6 @@ minio-licence.key
 
 .run
 .full-review
+
+# Forgejo runner state (holds the runner token)
+.forgejo/runner/data/

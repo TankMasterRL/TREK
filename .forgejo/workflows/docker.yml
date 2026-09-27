@@ -1,0 +1,104 @@
+name: Build & Push Docker Image
+
+# Forgejo Actions counterpart of .github/workflows/docker.yml: pushing a
+# v<semver> tag builds the root Dockerfile and pushes the image to a registry,
+# with the same tag scheme the GitHub release workflows publish:
+#
+#   v4.3.0        -> :4.3.0        :4      :latest
+#   v4.4.0-pre.1  -> :4.4.0-pre.1  :4-pre  :latest-pre
+#
+# Runner setup and the repository secrets/variables this reads are documented
+# in .forgejo/runner/README.md.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  build:
+    # The runner must give job containers a Docker daemon — .forgejo/runner/
+    # sets that up with Docker-in-Docker.
+    runs-on: docker
+    # Pinned here rather than left to the runner's label mapping: the default
+    # node image has no docker CLI, which login and buildx both need.
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Resolve image name and tags
+        id: meta
+        env:
+          TAG: ${{ forgejo.ref_name }}
+          SERVER_URL: ${{ forgejo.server_url }}
+          REPOSITORY: ${{ forgejo.repository }}
+          REGISTRY: ${{ vars.REGISTRY }}
+          IMAGE: ${{ vars.IMAGE }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          # APP_VERSION must be semver, or the plugin TREK-compatibility gate
+          # switches itself off (server/src/nest/plugins/install/host-compat.ts).
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG is not v<major>.<minor>.<patch>[-<prerelease>]"
+            exit 1
+          fi
+
+          # Default to this Forgejo instance's own container registry.
+          if [ -z "$REGISTRY" ]; then
+            REGISTRY="${SERVER_URL#*://}"
+            REGISTRY="${REGISTRY%%/*}"
+          fi
+          # Registries reject upper-case repository names.
+          IMAGE="$(printf '%s' "${IMAGE:-$REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          REF="$REGISTRY/$IMAGE"
+
+          MAJOR="${VERSION%%.*}"
+          SUFFIX=""
+          if [[ "$VERSION" == *-* ]]; then
+            SUFFIX="-pre"
+          fi
+
+          {
+            echo "registry=$REGISTRY"
+            echo "ref=$REF"
+            echo "version=$VERSION"
+            echo "tags<<EOF"
+            echo "$REF:$VERSION"
+            echo "$REF:$MAJOR$SUFFIX"
+            echo "$REF:latest$SUFFIX"
+            echo "EOF"
+          } >> "$FORGEJO_OUTPUT"
+          echo "Publishing $REF:{$VERSION,$MAJOR$SUFFIX,latest$SUFFIX}"
+
+      - uses: actions/checkout@v4
+
+      # Absolute URLs: the docker/* actions are not guaranteed to be mirrored
+      # on the instance's DEFAULT_ACTIONS_URL.
+      - name: Set up QEMU
+        if: vars.PLATFORMS != ''
+        uses: https://github.com/docker/setup-qemu-action@v3
+
+      - uses: https://github.com/docker/setup-buildx-action@v3
+
+      - uses: https://github.com/docker/login-action@v3
+        with:
+          registry: ${{ steps.meta.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: https://github.com/docker/build-push-action@v6
+        with:
+          context: .
+          # Empty builds for the runner's native platform only.
+          platforms: ${{ vars.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Inspect pushed image
+        run: docker buildx imagetools inspect "${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}"

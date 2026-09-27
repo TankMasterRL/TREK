@@ -1,0 +1,23 @@
+# Minimal Forgejo runner config for .forgejo/workflows/docker.yml. Copy it to
+# data/runner-config.yml and fill in server.connections (README.md). Keys left
+# out keep the runner's defaults; `forgejo-runner generate-config` prints them all.
+
+runner:
+  labels:
+    # `runs-on: docker` in the workflow targets this label.
+    - docker:docker://ghcr.io/catthehacker/ubuntu:act-24.04
+  envs:
+    # How the docker CLI inside a job reaches the DinD daemon that runs it…
+    DOCKER_HOST: tcp://dind.docker.internal:2375
+
+container:
+  # …which from inside that daemon's containers is its host gateway.
+  options: --add-host=dind.docker.internal:host-gateway
+
+server:
+  connections:
+    forgejo:
+      # From Settings → Actions → Runners → Create new runner.
+      url: https://forgejo.example.com/
+      uuid: REPLACE_WITH_RUNNER_UUID
+      token: REPLACE_WITH_RUNNER_TOKEN
