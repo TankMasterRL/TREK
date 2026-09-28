@@ -4,8 +4,10 @@
 
 runner:
   labels:
-    # `runs-on: docker` in the workflow targets this label.
-    - docker:docker://ghcr.io/catthehacker/ubuntu:act-24.04
+    # `runs-on: docker` in the workflow targets this label. The image is the
+    # default for jobs without their own `container:`; the Docker build job
+    # brings docker:29-cli.
+    - docker:docker://node:24-trixie
   envs:
     # How the docker CLI inside a job reaches the DinD daemon that runs it…
     DOCKER_HOST: tcp://dind.docker.internal:2375

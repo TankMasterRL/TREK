@@ -3,7 +3,10 @@
 # images without being handed the host's docker socket. Setup: README.md.
 services:
   docker-in-docker:
-    image: docker:dind
+    # 29+: fresh installs default to the containerd image store, which lets the
+    # daemon's built-in BuildKit build multi-platform images without a
+    # separate builder image.
+    image: docker:29-dind
     privileged: true
     # Plain TCP is only reachable on this compose network and from the job
     # containers the daemon itself runs; no port is published to the host.

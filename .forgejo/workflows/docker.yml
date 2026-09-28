@@ -7,6 +7,8 @@ name: Build & Push Docker Image
 #   v4.3.0        -> :4.3.0        :4      :latest
 #   v4.4.0-pre.1  -> :4.4.0-pre.1  :4-pre  :latest-pre
 #
+# Only official images are used: the job runs in docker:29-cli and builds with
+# the daemon's own BuildKit, so no builder or QEMU helper image is pulled.
 # Runner setup and the repository secrets/variables this reads are documented
 # in .forgejo/runner/README.md.
 
@@ -17,17 +19,21 @@ on:
 
 jobs:
   build:
-    # The runner must give job containers a Docker daemon — .forgejo/runner/
+    # The runner must give job containers a Docker 29+ daemon — .forgejo/runner/
     # sets that up with Docker-in-Docker.
     runs-on: docker
     # Pinned here rather than left to the runner's label mapping: the default
-    # node image has no docker CLI, which login and buildx both need.
+    # node image has no docker CLI. docker:cli ships the CLI, buildx and git.
     container:
-      image: ghcr.io/catthehacker/ubuntu:act-24.04
+      image: docker:29-cli
     defaults:
       run:
-        shell: bash
+        shell: sh
     steps:
+      # The JavaScript actions below need node, which docker:cli lacks.
+      - name: Install node
+        run: apk add --no-cache nodejs
+
       - name: Resolve image name and tags
         id: meta
         env:
@@ -37,11 +43,11 @@ jobs:
           REGISTRY: ${{ vars.REGISTRY }}
           IMAGE: ${{ vars.IMAGE }}
         run: |
-          set -euo pipefail
+          set -eu
           VERSION="${TAG#v}"
           # APP_VERSION must be semver, or the plugin TREK-compatibility gate
           # switches itself off (server/src/nest/plugins/install/host-compat.ts).
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::tag $TAG is not v<major>.<minor>.<patch>[-<prerelease>]"
             exit 1
           fi
@@ -56,10 +62,10 @@ jobs:
           REF="$REGISTRY/$IMAGE"
 
           MAJOR="${VERSION%%.*}"
-          SUFFIX=""
-          if [[ "$VERSION" == *-* ]]; then
-            SUFFIX="-pre"
-          fi
+          case "$VERSION" in
+            *-*) SUFFIX="-pre" ;;
+            *) SUFFIX="" ;;
+          esac
 
           {
             echo "registry=$REGISTRY"
@@ -76,13 +82,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Absolute URLs: the docker/* actions are not guaranteed to be mirrored
-      # on the instance's DEFAULT_ACTIONS_URL.
-      - name: Set up QEMU
-        if: vars.PLATFORMS != ''
-        uses: https://github.com/docker/setup-qemu-action@v3
-
-      - uses: https://github.com/docker/setup-buildx-action@v3
-
+      # on the instance's DEFAULT_ACTIONS_URL. setup-buildx-action and
+      # setup-qemu-action are left out on purpose — they pull non-official
+      # images (moby/buildkit, tonistiigi/binfmt).
       - uses: https://github.com/docker/login-action@v3
         with:
           registry: ${{ steps.meta.outputs.registry }}
@@ -93,7 +95,8 @@ jobs:
         uses: https://github.com/docker/build-push-action@v6
         with:
           context: .
-          # Empty builds for the runner's native platform only.
+          # Empty builds for the runner's native platform only. Other platforms
+          # need QEMU registered on the build host (.forgejo/runner/README.md).
           platforms: ${{ vars.PLATFORMS }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -101,4 +104,7 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version }}
 
       - name: Inspect pushed image
-        run: docker buildx imagetools inspect "${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}"
+        env:
+          REF: ${{ steps.meta.outputs.ref }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "$REF:$VERSION"
