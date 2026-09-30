@@ -1,0 +1,33 @@
+# Forgejo runner for .forgejo/workflows/docker.yml. Jobs run inside an isolated
+# Docker-in-Docker daemon rather than the host's Docker, so a workflow can build
+# images without being handed the host's docker socket. Setup: README.md.
+services:
+  docker-in-docker:
+    # 29+: fresh installs default to the containerd image store, which lets the
+    # daemon's built-in BuildKit build multi-platform images without a
+    # separate builder image.
+    image: docker:29-dind
+    privileged: true
+    # Plain TCP is only reachable on this compose network and from the job
+    # containers the daemon itself runs; no port is published to the host.
+    command: ['dockerd', '-H', 'tcp://0.0.0.0:2375', '--tls=false']
+    volumes:
+      # Keeps pulled base images between restarts.
+      - dind-storage:/var/lib/docker
+    restart: unless-stopped
+
+  runner:
+    image: data.forgejo.org/forgejo/runner:13
+    depends_on:
+      - docker-in-docker
+    environment:
+      DOCKER_HOST: tcp://docker-in-docker:2375
+    # Unprivileged; owns ./data (see README.md).
+    user: 1001:1001
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    command: forgejo-runner daemon --config runner-config.yml
+
+volumes:
+  dind-storage:
