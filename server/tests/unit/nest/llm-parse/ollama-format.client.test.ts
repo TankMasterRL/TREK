@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { safeFetchLlmMock } = vi.hoisted(() => ({ safeFetchLlmMock: vi.fn() }));
 vi.mock('../../../../src/utils/ssrfGuard', () => ({ safeFetchLlm: safeFetchLlmMock }));
 
-import { toNativeBase, extractEnforced } from '../../../../src/nest/llm-parse/router/ollama-format.client';
+import { extractEnforced } from '../../../../src/nest/llm-parse/router/ollama-format.client';
 
 function mockFetch(impl: (url: string, init: RequestInit) => Promise<Response> | Response) {
   safeFetchLlmMock.mockImplementation(impl as unknown as typeof fetch);
@@ -27,15 +27,6 @@ const INPUT = {
 };
 
 beforeEach(() => safeFetchLlmMock.mockReset());
-
-describe('toNativeBase', () => {
-  it('strips a /v1 suffix and trailing slashes', () => {
-    expect(toNativeBase('http://ollama:11434/v1')).toBe('http://ollama:11434');
-    expect(toNativeBase('http://ollama:11434/v1/')).toBe('http://ollama:11434');
-    expect(toNativeBase('http://ollama:11434/')).toBe('http://ollama:11434');
-    expect(toNativeBase('http://ollama:11434')).toBe('http://ollama:11434');
-  });
-});
 
 describe('extractEnforced', () => {
   it('posts to the native /api/chat with the grammar format and thinking disabled', async () => {

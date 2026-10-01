@@ -1,7 +1,8 @@
 /**
  * The extraction router — tuned for ONE model call per document.
  *
- *   1. exactly one grammar-ENFORCED call (Ollama native `format`):
+ *   1. exactly one grammar-ENFORCED call (Ollama's native `format`, LM Studio's strict
+ *      `response_format` — see ./enforced-clients.ts):
  *        - flights  → a flat ARRAY of legs in a single call (a capable model fills every
  *          leg at once — far faster than one call per leg);
  *        - otherwise → one flat single-reservation call, with a type-specific schema when the
@@ -22,12 +23,19 @@ import { normalizeLocalDateTime, parseMeridiemClock } from '@trek/shared';
 import type { KiReservation } from '../../booking-import/kitinerary.types';
 import { nuExtractToKiReservations } from '../clients/nuextract';
 import { FLAT_SCHEMA_BY_TYPE, FLAT_TYPES, FLIGHTS_ARRAY_SCHEMA, UNION_SINGLE_SCHEMA, type FlatType, type FlatLike } from './flat-schemas';
-import { extractEnforced } from './ollama-format.client';
+import { enforcedExtractorFor } from './enforced-clients';
+import type { LlmProvider } from '../llm-config';
 
 export interface RouterContext {
   baseUrl: string;
   model: string;
   apiKey?: string;
+  /**
+   * Which self-hosted server answers: 'local' (Ollama) or 'lmstudio'. Only the
+   * transport differs — both enforce the schema at sampling time, so everything
+   * below (the prompts, the type detection, Schicht 2) is provider-agnostic.
+   */
+  provider?: LlmProvider;
 }
 
 const TRANSPORT_TYPES: FlatType[] = ['flight', 'train', 'bus', 'ferry'];
@@ -206,7 +214,7 @@ async function extractFlights(text: string, ctx: RouterContext): Promise<FlatLik
     'Extract EVERY flight segment in the document (each flight number is one segment; a round trip has the ' +
     'outbound AND the return legs). vehicle_number = the flight number, from_code/to_code = 3-letter IATA codes, ' +
     "departure_time/arrival_time = full ISO 'YYYY-MM-DDTHH:MM:00' using the date of the section heading each flight is listed under.";
-  const out = await extractEnforced({ baseUrl: ctx.baseUrl, model: ctx.model, apiKey: ctx.apiKey, system, user: `Document:\n${text}`, schema: FLIGHTS_ARRAY_SCHEMA, numPredict: 900 });
+  const out = await enforcedExtractorFor(ctx.provider)({ baseUrl: ctx.baseUrl, model: ctx.model, apiKey: ctx.apiKey, system, user: `Document:\n${text}`, schema: FLIGHTS_ARRAY_SCHEMA, numPredict: 900 });
   const legs = Array.isArray((out as { flights?: unknown })?.flights) ? (out as { flights: Record<string, unknown>[] }).flights : [];
   return legs.map((leg) => fixArrivalDate(normalizeDates({ ...leg, type: 'flight' as FlatType })));
 }
@@ -216,7 +224,7 @@ async function extractFlights(text: string, ctx: RouterContext): Promise<FlatLik
 async function extractSingle(text: string, ctx: RouterContext): Promise<FlatLike> {
   const known = detectType(text);
   const call = (schema: Record<string, unknown>, hint: string) =>
-    extractEnforced({
+    enforcedExtractorFor(ctx.provider)({
       baseUrl: ctx.baseUrl, model: ctx.model, apiKey: ctx.apiKey,
       system: `Extract the single reservation from the document into the flat fields. ${hint} Omit any field that is truly absent.`,
       user: `Document:\n${text}`,

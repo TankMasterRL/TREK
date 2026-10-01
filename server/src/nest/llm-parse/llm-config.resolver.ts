@@ -1,6 +1,12 @@
 import { ADDON_IDS } from '../../addons';
 import { AddonsService } from '../addons/addons.service';
-import { decryptLlmApiKey, LLM_PROVIDERS, type LlmProvider, type ResolvedLlmConfig } from './llm-config';
+import {
+  decryptLlmApiKey,
+  isSelfHostedLlmProvider,
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type ResolvedLlmConfig,
+} from './llm-config';
 import { DatabaseService } from '../database/database.service';
 import { SettingsService } from '../settings/settings.service';
 import { Injectable } from '@nestjs/common';
@@ -33,18 +39,38 @@ export class LlmConfigResolver {
     return this.readInstanceConfig() ?? this.readUserConfig(userId);
   }
 
-  private readInstanceConfig(): ResolvedLlmConfig | null {
+  /**
+   * The admin's stored API key for the instance config, decrypted.
+   *
+   * Separate from resolve() because the admin management routes need it BEFORE
+   * there is a resolvable config: the panel lists a self-hosted server's models
+   * so the admin can pick one, so the model field is still empty at that point
+   * and readInstanceConfig() answers null. A v1 LM Studio can be configured to
+   * require a token (`Authorization: Bearer`), and it refuses the model list
+   * without one — so the key is read on its own rather than inferred from a
+   * config that is not finished yet.
+   */
+  instanceApiKey(): string | undefined {
+    return decryptLlmApiKey(this.readInstanceConfigBlob()?.apiKey);
+  }
+
+  /** The `llm_parsing` addon's stored config JSON, or null when unset/unparseable. */
+  private readInstanceConfigBlob(): Record<string, unknown> | null {
     const row = this.dbService.get<{ config?: string } | undefined>(
       'SELECT config FROM addons WHERE id = ?',
       ADDON_IDS.LLM_PARSING,
     );
     if (!row?.config) return null;
-    let cfg: Record<string, unknown>;
     try {
-      cfg = JSON.parse(row.config || '{}');
+      return JSON.parse(row.config || '{}');
     } catch {
       return null;
     }
+  }
+
+  private readInstanceConfig(): ResolvedLlmConfig | null {
+    const cfg = this.readInstanceConfigBlob();
+    if (!cfg) return null;
     const provider = asProvider(cfg.provider);
     const model = typeof cfg.model === 'string' ? cfg.model.trim() : '';
     if (!provider || !model) return null;
@@ -65,7 +91,7 @@ export class LlmConfigResolver {
 
     // #1772: the address this server calls is instance configuration, never a
     // personal preference. The request leaves OUR network and safeFetchLlm
-    // deliberately allows loopback/LAN so a self-hosted Ollama keeps working,
+    // deliberately allows loopback/LAN so a self-hosted Ollama or LM Studio keeps working,
     // which is a reasonable trade for whoever runs the instance and a network
     // probe for anyone else. An instance has exactly one such address, so it
     // comes from the admin-set instance-wide defaults for EVERY user, including
@@ -73,10 +99,13 @@ export class LlmConfigResolver {
     // (booking import and the plugin RPC surface), and the only place that also
     // catches values already sitting in the db.
     const endpoints = this.settings.getAdminUserDefaults();
-    // 'local' is an endpoint choice too ("some address I name"), so without an
-    // admin-set local endpoint there is no config at all, never a silent
-    // redirect to a different provider.
-    if (provider === 'local' && asProvider(endpoints.llm_provider) !== 'local') return null;
+    // A self-hosted provider ('local' = Ollama, 'lmstudio' = LM Studio) is an
+    // endpoint choice too ("some address I name"), so without an admin-set
+    // endpoint there is no config at all, never a silent redirect to a
+    // different provider. The admin default must name the SAME provider: the
+    // one address an instance has belongs to one kind of server, and Ollama's
+    // native API is not LM Studio's.
+    if (isSelfHostedLlmProvider(provider) && asProvider(endpoints.llm_provider) !== provider) return null;
     const baseUrl =
       typeof endpoints.llm_base_url === 'string' && endpoints.llm_base_url.trim()
         ? endpoints.llm_base_url.trim()

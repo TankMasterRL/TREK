@@ -12,6 +12,8 @@ import AirTrailIcon from '../shared/AirTrailIcon'
 import { DOCUMENT_PROVIDER_ICONS } from '../shared/DocumentProviderIcons'
 import AddonTile from './AddonTile'
 import AddonSubRow from './AddonSubRow'
+import { useLlmParsingConfig } from './useLlmParsingConfig'
+import { LLM_MASKED, LLM_PROVIDER_META } from './llmProviders'
 
 // Keys are the `icon` column from the addons table (see server seeds.ts); anything
 // unknown falls back to Puzzle. Users/Sparkles cover collab and llm_parsing, which
@@ -354,107 +356,23 @@ function GroupHead({ icon: Icon, label, hint, addons, t }: {
   )
 }
 
-const MASKED = '••••••••'
-const DEFAULT_OLLAMA_URL = 'http://localhost:11434/v1'
-
-/** Curated models the local extractor is tuned for, pullable via Ollama. The router drives
- *  one model per document via Ollama's grammar-constrained `format`; "thinking" is disabled
- *  automatically, so the Qwen3 family works without any tuning. A host only needs one. */
-const RECOMMENDED_MODELS: { id: string; label: string; note: string; recommended: boolean; vision: boolean }[] = [
-  { id: 'qwen3.5:4b', label: 'Qwen3.5 — 4B', note: 'Recommended · small and quick on CPU, 3.4 GB download, 256K context (thinking auto-disabled) · Apache-2.0', recommended: true, vision: true },
-]
-
 /**
- * Instance-wide AI-parsing config. When set, applies to the whole instance and
- * overrides per-user config (see server llmConfig.ts). The API key is masked on
- * read; an unchanged mask is treated as a no-op by the server. For the local
- * provider, it also lists installed Ollama models and can pull NuExtract models.
+ * Instance-wide AI-parsing config — the desktop shell over useLlmParsingConfig.
+ * All of the state, the model listing and the save live in that hook, shared with
+ * the phone shell; this file renders it.
  */
 function LlmParsingConfig({ addon }: { addon: Addon }) {
-  const toast = useToast()
-  const cfg = (addon.config ?? {}) as Record<string, unknown>
-  const [provider, setProvider] = useState<string>((cfg.provider as string) ?? 'local')
-  const [model, setModel] = useState<string>((cfg.model as string) ?? '')
-  const [baseUrl, setBaseUrl] = useState<string>((cfg.baseUrl as string) ?? '')
-  const [apiKey, setApiKey] = useState<string>((cfg.apiKey as string) ?? '')
-  const [saving, setSaving] = useState(false)
-
-  // Local-provider model management.
-  const [installed, setInstalled] = useState<string[]>([])
-  const [modelsErr, setModelsErr] = useState('')
-  const [loadingModels, setLoadingModels] = useState(false)
-  const [pulling, setPulling] = useState<string | null>(null)
-  const [pullPct, setPullPct] = useState(0)
-  const [pullStatus, setPullStatus] = useState('')
-
-  const effectiveUrl = baseUrl.trim() || DEFAULT_OLLAMA_URL
-  const isInstalled = (id: string) => installed.some(n => n === id || n.startsWith(id + ':') || n.startsWith(id))
-
-  const loadModels = async () => {
-    if (provider !== 'local') return
-    setLoadingModels(true)
-    setModelsErr('')
-    try {
-      const res = await adminApi.llmLocalModels(effectiveUrl)
-      setInstalled(res.models.map(m => m.name))
-    } catch (e: unknown) {
-      setModelsErr(e instanceof Error ? e.message : 'Could not reach the local LLM server')
-      setInstalled([])
-    } finally {
-      setLoadingModels(false)
-    }
-  }
-
-  // Load installed models when the local provider is active.
-  useEffect(() => {
-    if (provider === 'local') loadModels()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider])
-
-  const pull = async (id: string) => {
-    if (pulling) return
-    setPulling(id)
-    setPullPct(0)
-    setPullStatus('starting…')
-    try {
-      await adminApi.llmLocalPull(effectiveUrl, id, (p) => {
-        if (p.error) throw new Error(p.error)
-        if (p.status) setPullStatus(p.status)
-        if (p.total && p.completed != null) setPullPct(Math.round((p.completed / p.total) * 100))
-      })
-      toast.success('Model pulled')
-      setModel(id)
-      await loadModels()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Pull failed')
-    } finally {
-      setPulling(null)
-      setPullPct(0)
-      setPullStatus('')
-    }
-  }
-
-  const save = async () => {
-    setSaving(true)
-    try {
-      // Send the masked sentinel unchanged so the server keeps the stored key.
-      await adminApi.updateAddon(addon.id, { config: { provider, model: model.trim(), baseUrl: provider === 'anthropic' ? '' : baseUrl.trim(), apiKey, multimodal: cfg.multimodal === true } })
-      toast.success('Saved')
-    } catch {
-      toast.error('Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const c = useLlmParsingConfig(addon)
 
   const fieldCls = 'w-full rounded-lg border border-edge-secondary bg-surface px-2.5 py-1.5 text-caption text-content placeholder:text-content-faint transition-colors focus:border-edge focus:outline-none'
   const labelCls = 'mb-1 block text-caption font-medium text-content-secondary'
 
-  const providerOptions = [
-    { value: 'local', label: 'Local · OpenAI-compatible', icon: <Server size={14} />, badge: 'Ollama' },
-    { value: 'openai', label: 'OpenAI', icon: <Cloud size={14} /> },
-    { value: 'anthropic', label: 'Anthropic', icon: <Sparkles size={14} /> },
-  ]
+  const providerOptions = LLM_PROVIDER_META.map(m => ({
+    value: m.value,
+    label: m.label,
+    icon: m.selfHosted ? <Server size={14} /> : m.value === 'anthropic' ? <Sparkles size={14} /> : <Cloud size={14} />,
+    badge: m.badge,
+  }))
 
   /* Lives in the tile's shelf like the collab toggles, so everything is caption-
      sized and single-column — the band this used to be had a whole page width. */
@@ -466,47 +384,47 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
 
       <div>
         <span className={labelCls}>Provider</span>
-        <CustomSelect value={provider} onChange={v => setProvider(String(v))} options={providerOptions} />
+        <CustomSelect value={c.provider} onChange={v => c.setProvider(String(v))} options={providerOptions} />
       </div>
-      {provider !== 'anthropic' && (
+      {c.meta.defaultBaseUrl && (
         <label className="block">
           <span className={labelCls}>Base URL</span>
-          <input type="url" autoComplete="off" className={fieldCls} value={baseUrl} onChange={e => setBaseUrl(e.target.value)} onBlur={loadModels} placeholder={provider === 'local' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'} />
+          <input type="url" autoComplete="off" className={fieldCls} value={c.baseUrl} onChange={e => c.setBaseUrl(e.target.value)} onBlur={c.loadModels} placeholder={c.meta.defaultBaseUrl} />
         </label>
       )}
       <label className="block">
         <span className={labelCls}>API key</span>
-        <input type="password" className={fieldCls} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={apiKey === MASKED ? MASKED : provider === 'local' ? '(often not required)' : 'sk-…'} />
+        <input type="password" className={fieldCls} value={c.apiKey} onChange={e => c.setApiKey(e.target.value)} placeholder={c.apiKey === LLM_MASKED ? LLM_MASKED : c.meta.selfHosted ? '(often not required)' : 'sk-…'} />
       </label>
-      {provider === 'anthropic' && (
+      {c.provider === 'anthropic' && (
         <p className="text-caption text-content-faint">Anthropic reads PDFs (including scans) natively. Local/OpenAI models receive extracted text — scanned PDFs need Anthropic.</p>
       )}
       <label className="block">
         <span className={labelCls}>Model</span>
-        <input autoComplete="off" className={fieldCls} value={model} onChange={e => setModel(e.target.value)} placeholder={provider === 'anthropic' ? 'claude-opus-4-8' : provider === 'openai' ? 'gpt-4o' : 'select or pull below'} />
+        <input autoComplete="off" className={fieldCls} value={c.model} onChange={e => c.setModel(e.target.value)} placeholder={c.meta.modelPlaceholder} />
       </label>
 
-      {/* Local model management (Ollama) */}
-      {provider === 'local' && (
+      {/* Model management for a server the operator runs (Ollama, LM Studio) */}
+      {c.meta.selfHosted && (
         <div className="space-y-2 rounded-lg border border-edge-secondary bg-surface p-2.5">
           <div className="flex items-center justify-between">
             <span className="text-caption font-medium text-content-secondary">Installed on the server</span>
-            <button type="button" onClick={loadModels} disabled={loadingModels} className="text-caption text-content-muted underline disabled:opacity-60">
-              {loadingModels ? 'Loading…' : 'Refresh'}
+            <button type="button" onClick={c.loadModels} disabled={c.loadingModels} className="text-caption text-content-muted underline disabled:opacity-60">
+              {c.loadingModels ? 'Loading…' : 'Refresh'}
             </button>
           </div>
-          {modelsErr && <p className="text-caption text-danger">{modelsErr}</p>}
-          {!modelsErr && installed.length === 0 && !loadingModels && (
+          {c.modelsErr && <p className="text-caption text-danger">{c.modelsErr}</p>}
+          {!c.modelsErr && c.installed.length === 0 && !c.loadingModels && (
             <p className="text-caption text-content-faint">No models installed yet — pull one below.</p>
           )}
-          {installed.length > 0 && (
+          {c.installed.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {installed.map(name => (
+              {c.installed.map(name => (
                 <button type="button"
                   key={name}
                   title={name}
-                  onClick={() => setModel(name)}
-                  className={`max-w-full truncate rounded-full border px-2 py-0.5 text-caption transition-colors ${model === name ? 'border-transparent bg-accent text-accent-text' : 'border-edge-secondary text-content-secondary hover:border-edge'}`}
+                  onClick={() => c.setModel(name)}
+                  className={`max-w-full truncate rounded-full border px-2 py-0.5 text-caption transition-colors ${c.model === name ? 'border-transparent bg-accent text-accent-text' : 'border-edge-secondary text-content-secondary hover:border-edge'}`}
                 >
                   {name}
                 </button>
@@ -517,10 +435,10 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
           <div className="border-t border-edge-secondary pt-2">
             <div className="mb-1.5 text-caption font-medium text-content-secondary">Pull a recommended model</div>
             <div className="space-y-1">
-              {RECOMMENDED_MODELS.map(m => {
-                const installedHere = isInstalled(m.id)
-                const isPulling = pulling === m.id
-                const active = model === m.id
+              {c.recommended.map(m => {
+                const installedHere = c.isInstalled(m.id)
+                const isPulling = c.pulling === m.id
+                const active = c.model === m.id
                 return (
                   <div key={m.id} className="min-w-0" title={m.note}>
                     <div className="flex items-center gap-2">
@@ -529,11 +447,11 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
                         <span className="shrink-0 rounded-md bg-success-soft px-1.5 py-px text-caption font-semibold text-success">Recommended</span>
                       )}
                       {installedHere ? (
-                        <button type="button" onClick={() => setModel(m.id)} disabled={active} className={`shrink-0 rounded-md px-2 py-1 text-caption font-medium transition-colors ${active ? 'bg-surface-tertiary text-content-muted' : 'border border-edge-secondary text-content-secondary hover:border-edge'}`}>
+                        <button type="button" onClick={() => c.setModel(m.id)} disabled={active} className={`shrink-0 rounded-md px-2 py-1 text-caption font-medium transition-colors ${active ? 'bg-surface-tertiary text-content-muted' : 'border border-edge-secondary text-content-secondary hover:border-edge'}`}>
                           {active ? 'Selected' : 'Use'}
                         </button>
                       ) : (
-                        <button type="button" onClick={() => pull(m.id)} disabled={!!pulling} className="shrink-0 rounded-md bg-accent px-2 py-1 text-caption font-medium text-accent-text disabled:opacity-60">
+                        <button type="button" onClick={() => c.pull(m.id)} disabled={!!c.pulling} className="shrink-0 rounded-md bg-accent px-2 py-1 text-caption font-medium text-accent-text disabled:opacity-60">
                           {isPulling ? 'Pulling…' : 'Pull'}
                         </button>
                       )}
@@ -541,9 +459,9 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
                     {isPulling && (
                       <div className="mt-1">
                         <div className="h-1 w-full overflow-hidden rounded-full bg-surface-tertiary">
-                          <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${pullPct}%` }} />
+                          <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${c.pullPct}%` }} />
                         </div>
-                        <div className="mt-0.5 text-caption text-content-faint">{pullStatus}{pullPct ? ` · ${pullPct}%` : ''}</div>
+                        <div className="mt-0.5 text-caption text-content-faint">{c.pullStatus}{c.pullPct ? ` · ${c.pullPct}%` : ''}</div>
                       </div>
                     )}
                   </div>
@@ -555,8 +473,8 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
       )}
 
       <div className="flex justify-end">
-        <button type="button" onClick={save} disabled={saving} className="rounded-lg bg-accent px-3 py-1.5 text-caption font-medium text-accent-text transition-opacity disabled:opacity-60">
-          {saving ? 'Saving…' : 'Save'}
+        <button type="button" onClick={c.save} disabled={c.saving} className="rounded-lg bg-accent px-3 py-1.5 text-caption font-medium text-accent-text transition-opacity disabled:opacity-60">
+          {c.saving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </li>

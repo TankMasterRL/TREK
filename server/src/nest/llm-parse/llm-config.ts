@@ -13,7 +13,7 @@ import { maybe_encrypt_api_key, decrypt_api_key } from '../common/crypto/apiKeyC
  * per-user encrypted-settings pattern in settingsService.ts.
  */
 
-export type LlmProvider = 'local' | 'openai' | 'anthropic';
+export type LlmProvider = 'local' | 'lmstudio' | 'openai' | 'anthropic';
 
 /** Fully-resolved config the clients consume. */
 export interface ResolvedLlmConfig {
@@ -33,8 +33,29 @@ export interface LlmAddonConfig {
   multimodal?: boolean;
 }
 
-export const LLM_PROVIDERS: LlmProvider[] = ['local', 'openai', 'anthropic'];
+export const LLM_PROVIDERS: LlmProvider[] = ['local', 'lmstudio', 'openai', 'anthropic'];
 export const MASKED_VALUE = '••••••••';
+
+/**
+ * The providers that name a server the operator runs: 'local' is an Ollama,
+ * 'lmstudio' an LM Studio. Both are "an endpoint I name" rather than a hosted
+ * service at a fixed address, so both are instance configuration (#1772) and
+ * both are driven through the grammar-enforced extraction router instead of the
+ * single-shot client. Every rule that used to test `=== 'local'` asks this
+ * instead, so a third self-hosted server is one entry, not a sweep.
+ */
+export const SELF_HOSTED_LLM_PROVIDERS: LlmProvider[] = ['local', 'lmstudio'];
+
+/** Default endpoint per self-hosted provider — Ollama's and LM Studio's own ports. */
+export const SELF_HOSTED_LLM_DEFAULT_BASE_URL: Record<string, string> = {
+  local: 'http://localhost:11434/v1',
+  lmstudio: 'http://localhost:1234/v1',
+};
+
+/** True when the provider points at a server the operator runs (see above). */
+export function isSelfHostedLlmProvider(value: unknown): value is LlmProvider {
+  return typeof value === 'string' && (SELF_HOSTED_LLM_PROVIDERS as string[]).includes(value);
+}
 
 /**
  * Prepare an admin config blob for persistence: encrypt a freshly-entered apiKey,

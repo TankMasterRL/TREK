@@ -1,4 +1,4 @@
-// FE-MOB-AADD-001 to FE-MOB-AADD-032
+// FE-MOB-AADD-001 to FE-MOB-AADD-033
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
@@ -49,9 +49,11 @@ function llmAddon(config: Record<string, unknown> = {}): AddonFixture {
   });
 }
 
-function modelsRoute(names: string[], seen?: (string | null)[]) {
+function modelsRoute(names: string[], seen?: (string | null)[], seenProviders?: (string | null)[]) {
   return http.get('/api/admin/llm/local/models', ({ request }) => {
-    seen?.push(new URL(request.url).searchParams.get('baseUrl'));
+    const params = new URL(request.url).searchParams;
+    seen?.push(params.get('baseUrl'));
+    seenProviders?.push(params.get('provider'));
     return HttpResponse.json({ models: names.map(name => ({ name, size: 1 })) });
   });
 }
@@ -585,7 +587,7 @@ describe('MAdminAddonManager', () => {
     expect(screen.getByText('starting…')).toBeInTheDocument();
 
     await screen.findByText('Model pulled');
-    expect(pulled).toEqual({ baseUrl: 'http://localhost:11434/v1', model: 'qwen3.5:4b' });
+    expect(pulled).toEqual({ baseUrl: 'http://localhost:11434/v1', model: 'qwen3.5:4b', provider: 'local' });
     expect(screen.getByPlaceholderText('select or pull below')).toHaveValue('qwen3.5:4b');
     // Reloaded models now contain the pulled one, so the row switches to "Selected".
     await waitFor(() => expect(screen.getByRole('button', { name: 'Selected' })).toBeDisabled());
@@ -670,5 +672,26 @@ describe('MAdminAddonManager', () => {
 
     await user.type(screen.getByDisplayValue('sk-secret'), '-rotated');
     expect(screen.getByDisplayValue('sk-secret-rotated')).toBeInTheDocument();
+  });
+  it('FE-MOB-AADD-033: LM Studio queries and downloads from its own server', async () => {
+    const user = userEvent.setup();
+    const urls: (string | null)[] = [];
+    const providers: (string | null)[] = [];
+    server.use(addonsRoute([llmAddon({ provider: 'local' })]), modelsRoute(['qwen3-8b'], urls, providers));
+    render(<MAdminAddonManager />);
+
+    await screen.findByText('Installed on the server');
+    await user.click(screen.getByRole('button', { name: /Local · LM Studio/ }));
+
+    // The provider rides along so the server knows which management API to speak,
+    // and the default endpoint follows the provider rather than staying on Ollama's.
+    await waitFor(() => expect(providers).toEqual(['local', 'lmstudio']));
+    expect(urls[1]).toBe('http://localhost:1234/v1');
+    expect(screen.getByPlaceholderText('http://localhost:1234/v1')).toBeInTheDocument();
+
+    // LM Studio downloads through its v1 API, so the Pull section stays — offering the
+    // model under the catalog id LM Studio downloads it by, not Ollama's tag.
+    expect(screen.getByText('Pull a recommended model')).toBeInTheDocument();
+    expect(screen.getByText('Qwen3.5 — 4B')).toBeInTheDocument();
   });
 });

@@ -4,8 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // enforced-extract output directly and inspect the flat reservations handed to the mapper,
 // so these tests cover the router's orchestration and deterministic post-processing without
 // a live Ollama or the real mapper.
-const { extractEnforced, mapToKi } = vi.hoisted(() => ({ extractEnforced: vi.fn(), mapToKi: vi.fn() }));
+const { extractEnforced, extractEnforcedLmStudio, mapToKi } = vi.hoisted(() => ({
+  extractEnforced: vi.fn(),
+  extractEnforcedLmStudio: vi.fn(),
+  mapToKi: vi.fn(),
+}));
 vi.mock('../../../../src/nest/llm-parse/router/ollama-format.client', () => ({ extractEnforced }));
+vi.mock('../../../../src/nest/llm-parse/router/lmstudio-format.client', () => ({ extractEnforcedLmStudio }));
 vi.mock('../../../../src/nest/llm-parse/clients/nuextract', () => ({ nuExtractToKiReservations: mapToKi }));
 
 import {
@@ -119,6 +124,22 @@ describe('routeExtraction', () => {
     // print in UTC, which shifted the value by the container's offset (#2094).
     expect(flats[0].departure_time).toBe('2025-08-23T10:00:00');
     expect(flats[1].arrival_time).toBe('2025-08-31T07:00:00'); // overnight roll (TZ-safe: derived from the ISO departure date)
+  });
+
+  it('sends the call to LM Studio when the context names it, and to Ollama otherwise', async () => {
+    // Everything above this line is provider-agnostic — only which client is asked
+    // changes, so one test covers the whole dispatch.
+    extractEnforcedLmStudio.mockResolvedValue({ name: 'B&B Hotel' });
+    await routeExtraction('Hotel booking', { ...CTX, provider: 'lmstudio' });
+    expect(extractEnforcedLmStudio).toHaveBeenCalledTimes(1);
+    expect(extractEnforced).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mapToKi.mockReturnValue([{ '@type': 'Mock' }]);
+    extractEnforced.mockResolvedValue({ name: 'B&B Hotel' });
+    await routeExtraction('Hotel booking', { ...CTX, provider: 'local' });
+    expect(extractEnforced).toHaveBeenCalledTimes(1);
+    expect(extractEnforcedLmStudio).not.toHaveBeenCalled();
   });
 
   it('extracts a single reservation with the type-specific schema when keywords give the type away', async () => {

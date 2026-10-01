@@ -373,7 +373,7 @@ const settings: TranslationStrings = {
   'settings.aiParsing.providerOpenai': 'OpenAI',
   'settings.aiParsing.providerAnthropic': 'Anthropic',
   'settings.aiParsing.localAdminOnly':
-    'Endpoint lokal (Ollama) diatur sekali untuk seluruh instansi di pengaturan administrator. Kamu tetap bisa memakai kunci OpenAI atau Anthropic milikmu sendiri di sini.',
+    'Endpoint lokal (Ollama atau LM Studio) diatur sekali untuk seluruh instansi di pengaturan administrator. Kamu tetap bisa memakai kunci OpenAI atau Anthropic milikmu sendiri di sini.',
   'settings.aiParsing.model': 'Model',
   'settings.aiParsing.baseUrl': 'URL Dasar',
   'settings.aiParsing.baseUrlHint':

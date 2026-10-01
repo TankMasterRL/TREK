@@ -7,6 +7,7 @@ import type { Settings } from '../../types'
 import Section from './Section'
 import ToggleSwitch from './ToggleSwitch'
 import CustomSelect from '../shared/CustomSelect'
+import { personalLlmProvider } from '../Admin/llmProviders'
 
 type Provider = NonNullable<Settings['llm_provider']>
 
@@ -42,13 +43,12 @@ export default function LlmConnectionSection(): React.ReactElement {
 
   // Hydrate from the loaded settings. llm_api_key arrives masked, so we only use
   // its presence to drive the placeholder, never the value itself. A stored
-  // 'local' from before #1772 shows as OpenAI (local state only, nothing is
-  // saved until Save is pressed) so the form never offers a value the server
-  // would refuse.
+  // self-hosted provider shows as OpenAI (see personalLlmProvider) so the form
+  // never offers a value the server would refuse.
   useEffect(() => {
     if (!isLoaded) return
     const stored = settings.llm_provider || 'openai'
-    setProvider(stored === 'local' ? 'openai' : stored)
+    setProvider(personalLlmProvider(stored))
     setModel(settings.llm_model || '')
     setMultimodal(settings.llm_multimodal === true)
     setHasStoredKey(!!settings.llm_api_key)
