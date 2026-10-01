@@ -769,6 +769,32 @@ describe('AddonManager', () => {
     });
   });
 
+  it('FE-ADMIN-ADDON-038: an Anthropic-compatible endpoint takes and saves a base URL', async () => {
+    const user = userEvent.setup();
+    const bodies: unknown[] = [];
+    server.use(
+      addonsRoute([llmAddon({ provider: 'openai', model: '', baseUrl: '', apiKey: '', multimodal: false })]),
+      http.put('/api/admin/addons/llm_parsing', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    render(<><ToastContainer /><AddonManager /></>);
+
+    await user.click(await screen.findByRole('button', { name: 'OpenAI' }));
+    await user.click(screen.getByRole('button', { name: /Anthropic-compatible/ }));
+    expect(screen.getByText(/Anthropic Messages API/)).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('https://gateway.example.com'), 'http://litellm:4000 ');
+    await user.type(screen.getByPlaceholderText('model id the endpoint serves'), 'glm-4.6');
+    await user.type(screen.getByPlaceholderText('API key for the endpoint'), 'k-live');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved');
+    expect(bodies[0]).toEqual({
+      config: { provider: 'anthropic-compatible', model: 'glm-4.6', baseUrl: 'http://litellm:4000', apiKey: 'k-live', multimodal: false },
+    });
+  });
+
   it('FE-ADMIN-ADDON-027: an error frame in the pull stream aborts the pull and is reported', async () => {
     const user = userEvent.setup();
     server.use(

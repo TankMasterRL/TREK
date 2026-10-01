@@ -6,13 +6,14 @@ import { useAddonStore } from '../../../store/addonStore'
 import { useToast } from '../../../components/shared/Toast'
 import {
   Puzzle, ListChecks, Wallet, FileText, CalendarDays, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen,
-  MessageCircle, StickyNote, BarChart3, Sparkles, Luggage, Plane, Server, Cloud, Bookmark, Check, Loader2,
+  MessageCircle, StickyNote, BarChart3, Sparkles, Luggage, Plane, Server, Cloud, Plug, Bookmark, Check, Loader2,
 } from 'lucide-react'
 import DawarichIcon from '../../../components/shared/DawarichIcon'
 import AirTrailIcon from '../../../components/shared/AirTrailIcon'
 import { DOCUMENT_PROVIDER_ICONS } from '../../../components/shared/DocumentProviderIcons'
 import MToggle from '../../components/MToggle'
 import { MAdminButton, MAdminCard, MAdminField, MAdminInput, MAdminSecretInput } from './MAdminUi'
+import { LLM_PROVIDER_META, llmBaseUrlForSave, llmProviderMeta } from '../../../components/Admin/llmProviders'
 
 const ICON_MAP = {
   ListChecks, Wallet, FileText, CalendarDays, Puzzle, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, Plane, Bookmark,
@@ -458,7 +459,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
     setSaving(true)
     try {
       // Send the masked sentinel unchanged so the server keeps the stored key.
-      await adminApi.updateAddon(addon.id, { config: { provider, model: model.trim(), baseUrl: baseUrl.trim(), apiKey, multimodal: cfg.multimodal === true } })
+      await adminApi.updateAddon(addon.id, { config: { provider, model: model.trim(), baseUrl: llmBaseUrlForSave(provider, baseUrl), apiKey, multimodal: cfg.multimodal === true } })
       toast.success('Saved')
     } catch {
       toast.error('Failed to save')
@@ -469,11 +470,12 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
 
   const sectionCls = 'font-geist text-[0.625rem] font-bold uppercase tracking-[0.06em] text-m-faint'
 
-  const providerOptions = [
-    { value: 'local', label: 'Local · OpenAI-compatible', icon: <Server size={14} />, badge: 'Ollama' },
-    { value: 'openai', label: 'OpenAI', icon: <Cloud size={14} /> },
-    { value: 'anthropic', label: 'Anthropic', icon: <Sparkles size={14} /> },
-  ]
+  const meta = llmProviderMeta(provider)
+  const providerIcons: Record<string, ComponentType<{ size?: number }>> = { local: Server, openai: Cloud, anthropic: Sparkles, 'anthropic-compatible': Plug }
+  const providerOptions = LLM_PROVIDER_META.map(({ value, label, badge }) => {
+    const Icon = providerIcons[value] ?? Cloud
+    return { value, label, badge, icon: <Icon size={14} /> }
+  })
 
   return (
     <div className="space-y-5 pl-[50px]">
@@ -510,7 +512,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
             })}
           </div>
         </MAdminField>
-        {provider !== 'anthropic' && (
+        {meta.baseUrlPlaceholder && (
           <MAdminField label="Base URL">
             <MAdminInput
               type="url"
@@ -518,7 +520,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
               value={baseUrl}
               onChange={e => setBaseUrl(e.target.value)}
               onBlur={loadModels}
-              placeholder={provider === 'local' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'}
+              placeholder={meta.baseUrlPlaceholder}
             />
           </MAdminField>
         )}
@@ -526,14 +528,10 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
           <MAdminSecretInput
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
-            placeholder={apiKey === MASKED ? MASKED : provider === 'local' ? '(often not required)' : 'sk-…'}
+            placeholder={apiKey === MASKED ? MASKED : meta.apiKeyPlaceholder}
           />
         </MAdminField>
-        {provider === 'anthropic' && (
-          <p className="font-geist text-[0.625rem] leading-relaxed text-m-faint">
-            Anthropic reads PDFs (including scans) natively. Local/OpenAI models receive extracted text — scanned PDFs need Anthropic.
-          </p>
-        )}
+        {meta.hint && <p className="font-geist text-[0.625rem] leading-relaxed text-m-faint">{meta.hint}</p>}
       </section>
 
       {/* Model */}
@@ -543,7 +541,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
           autoComplete="off"
           value={model}
           onChange={e => setModel(e.target.value)}
-          placeholder={provider === 'anthropic' ? 'claude-opus-4-8' : provider === 'openai' ? 'gpt-4o' : 'select or pull below'}
+          placeholder={meta.modelPlaceholder}
         />
 
         {/* Local model management (Ollama) */}

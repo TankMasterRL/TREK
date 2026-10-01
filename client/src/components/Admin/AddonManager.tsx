@@ -4,7 +4,7 @@ import { useTranslation } from '../../i18n'
 import { useAddonStore } from '../../store/addonStore'
 import { useIsDark } from '../../hooks/useIsDark'
 import { useToast } from '../shared/Toast'
-import { Puzzle, ListChecks, Wallet, FileText, CalendarDays, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, MessageCircle, StickyNote, BarChart3, Sparkles, Luggage, Plane, Server, Cloud, Bookmark, Users, Loader2 } from 'lucide-react'
+import { Puzzle, ListChecks, Wallet, FileText, CalendarDays, Globe, Briefcase, Image, Terminal, Link2, Compass, BookOpen, MessageCircle, StickyNote, BarChart3, Sparkles, Luggage, Plane, Server, Cloud, Plug, Bookmark, Users, Loader2 } from 'lucide-react'
 import CustomSelect from '../shared/CustomSelect'
 import EmptyState from '../shared/EmptyState'
 import DawarichIcon from '../shared/DawarichIcon'
@@ -12,6 +12,7 @@ import AirTrailIcon from '../shared/AirTrailIcon'
 import { DOCUMENT_PROVIDER_ICONS } from '../shared/DocumentProviderIcons'
 import AddonTile from './AddonTile'
 import AddonSubRow from './AddonSubRow'
+import { LLM_PROVIDER_META, llmBaseUrlForSave, llmProviderMeta } from './llmProviders'
 
 // Keys are the `icon` column from the addons table (see server seeds.ts); anything
 // unknown falls back to Puzzle. Users/Sparkles cover collab and llm_parsing, which
@@ -438,7 +439,7 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
     setSaving(true)
     try {
       // Send the masked sentinel unchanged so the server keeps the stored key.
-      await adminApi.updateAddon(addon.id, { config: { provider, model: model.trim(), baseUrl: provider === 'anthropic' ? '' : baseUrl.trim(), apiKey, multimodal: cfg.multimodal === true } })
+      await adminApi.updateAddon(addon.id, { config: { provider, model: model.trim(), baseUrl: llmBaseUrlForSave(provider, baseUrl), apiKey, multimodal: cfg.multimodal === true } })
       toast.success('Saved')
     } catch {
       toast.error('Failed to save')
@@ -450,11 +451,12 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
   const fieldCls = 'w-full rounded-lg border border-edge-secondary bg-surface px-2.5 py-1.5 text-caption text-content placeholder:text-content-faint transition-colors focus:border-edge focus:outline-none'
   const labelCls = 'mb-1 block text-caption font-medium text-content-secondary'
 
-  const providerOptions = [
-    { value: 'local', label: 'Local · OpenAI-compatible', icon: <Server size={14} />, badge: 'Ollama' },
-    { value: 'openai', label: 'OpenAI', icon: <Cloud size={14} /> },
-    { value: 'anthropic', label: 'Anthropic', icon: <Sparkles size={14} /> },
-  ]
+  const meta = llmProviderMeta(provider)
+  const providerIcons: Record<string, ComponentType<{ size?: number }>> = { local: Server, openai: Cloud, anthropic: Sparkles, 'anthropic-compatible': Plug }
+  const providerOptions = LLM_PROVIDER_META.map(({ value, label, badge }) => {
+    const Icon = providerIcons[value] ?? Cloud
+    return { value, label, badge, icon: <Icon size={14} /> }
+  })
 
   /* Lives in the tile's shelf like the collab toggles, so everything is caption-
      sized and single-column — the band this used to be had a whole page width. */
@@ -468,22 +470,20 @@ function LlmParsingConfig({ addon }: { addon: Addon }) {
         <span className={labelCls}>Provider</span>
         <CustomSelect value={provider} onChange={v => setProvider(String(v))} options={providerOptions} />
       </div>
-      {provider !== 'anthropic' && (
+      {meta.baseUrlPlaceholder && (
         <label className="block">
           <span className={labelCls}>Base URL</span>
-          <input type="url" autoComplete="off" className={fieldCls} value={baseUrl} onChange={e => setBaseUrl(e.target.value)} onBlur={loadModels} placeholder={provider === 'local' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'} />
+          <input type="url" autoComplete="off" className={fieldCls} value={baseUrl} onChange={e => setBaseUrl(e.target.value)} onBlur={loadModels} placeholder={meta.baseUrlPlaceholder} />
         </label>
       )}
       <label className="block">
         <span className={labelCls}>API key</span>
-        <input type="password" className={fieldCls} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={apiKey === MASKED ? MASKED : provider === 'local' ? '(often not required)' : 'sk-…'} />
+        <input type="password" className={fieldCls} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={apiKey === MASKED ? MASKED : meta.apiKeyPlaceholder} />
       </label>
-      {provider === 'anthropic' && (
-        <p className="text-caption text-content-faint">Anthropic reads PDFs (including scans) natively. Local/OpenAI models receive extracted text — scanned PDFs need Anthropic.</p>
-      )}
+      {meta.hint && <p className="text-caption text-content-faint">{meta.hint}</p>}
       <label className="block">
         <span className={labelCls}>Model</span>
-        <input autoComplete="off" className={fieldCls} value={model} onChange={e => setModel(e.target.value)} placeholder={provider === 'anthropic' ? 'claude-opus-4-8' : provider === 'openai' ? 'gpt-4o' : 'select or pull below'} />
+        <input autoComplete="off" className={fieldCls} value={model} onChange={e => setModel(e.target.value)} placeholder={meta.modelPlaceholder} />
       </label>
 
       {/* Local model management (Ollama) */}

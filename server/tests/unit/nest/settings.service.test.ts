@@ -46,7 +46,7 @@ import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser } from '../../helpers/factories';
 import { DatabaseService } from '../../../src/nest/database/database.service';
-import { SettingsService } from '../../../src/nest/settings/settings.service';
+import { SettingsService, isAdminOnlyEndpointSetting } from '../../../src/nest/settings/settings.service';
 
 const svc = new SettingsService(new DatabaseService(testDb));
 
@@ -374,5 +374,20 @@ describe('legacy quirk fixes', () => {
   it('SET-SVC-030 — bulk returns the count of keys actually written', () => {
     const { user } = createUser(testDb);
     expect(svc.bulkUpsertSettings(user.id, { a: '1', b: '••••••••' })).toBe(1);
+  });
+});
+
+describe('Anthropic-compatible LLM provider', () => {
+  it('SET-SVC-030 — an admin may set it as the instance default endpoint provider', () => {
+    svc.setAdminUserDefaults({ llm_provider: 'anthropic-compatible', llm_base_url: 'http://litellm:4000' });
+    expect(svc.getAdminUserDefaults().llm_provider).toBe('anthropic-compatible');
+    expect(() => svc.setAdminUserDefaults({ llm_provider: 'not-a-provider' })).toThrow(/Invalid value for llm_provider/);
+  });
+
+  it('SET-SVC-031 — it names an address, so a personal write of it is admin-only (#1772)', () => {
+    expect(isAdminOnlyEndpointSetting('llm_provider', 'anthropic-compatible')).toBe(true);
+    expect(isAdminOnlyEndpointSetting('llm_provider', 'local')).toBe(true);
+    expect(isAdminOnlyEndpointSetting('llm_provider', 'anthropic')).toBe(false);
+    expect(isAdminOnlyEndpointSetting('llm_provider', 'openai')).toBe(false);
   });
 });

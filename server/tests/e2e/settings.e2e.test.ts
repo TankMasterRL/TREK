@@ -141,6 +141,13 @@ describe('Settings e2e (real auth guard + temp SQLite)', () => {
       expect(countRows()).toBe(0);
     });
 
+    it('PUT 403 for a non-admin picking the Anthropic-compatible provider', async () => {
+      const res = await request(server).put('/api/settings').set('Cookie', sessionCookie(1))
+        .send({ key: 'llm_provider', value: 'anthropic-compatible' });
+      expect(res.status).toBe(403);
+      expect(countRows()).toBe(0);
+    });
+
     it('PUT lets a non-admin clear the base URL and pick a hosted provider', async () => {
       expect((await request(server).put('/api/settings').set('Cookie', sessionCookie(1))
         .send({ key: 'llm_base_url', value: '  ' })).status).toBe(200);

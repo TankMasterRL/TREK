@@ -7,6 +7,7 @@ import type { Settings } from '../../../types'
 import { MSetCard, MSetEyebrow, MSetSelectRow, MSetRow, MSetInput, MSetButton, MSetHint } from './MSettingsUi'
 import MToggle from '../../components/MToggle'
 import MSetPickerSheet from './MSetPickerSheet'
+import { personalLlmProvider } from '../../../components/Admin/llmProviders'
 
 type Provider = NonNullable<Settings['llm_provider']>
 
@@ -35,12 +36,12 @@ export default function MLlmConnectionSection(): React.ReactElement {
 
   // Hydrate from the loaded settings. llm_api_key arrives masked, so we only use
   // its presence to drive the placeholder, never the value itself. A stored
-  // 'local' from before #1772 shows as OpenAI (local state only, nothing is
-  // saved until Save is pressed).
+  // endpoint provider shows as its hosted counterpart (see personalLlmProvider;
+  // local state only, nothing is saved until Save is pressed).
   useEffect(() => {
     if (!isLoaded) return
     const stored = settings.llm_provider || 'openai'
-    setProvider(stored === 'local' ? 'openai' : stored)
+    setProvider(personalLlmProvider(stored))
     setModel(settings.llm_model || '')
     setMultimodal(settings.llm_multimodal === true)
     setHasStoredKey(!!settings.llm_api_key)
