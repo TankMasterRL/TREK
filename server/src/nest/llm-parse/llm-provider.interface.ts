@@ -24,6 +24,13 @@ export interface LlmExtractionInput {
  * It returns the parsed `reservations` array (best-effort: `[]` on a malformed or
  * empty response, never throwing for content reasons). The caller validates and
  * maps via the shared kitinerary mapper.
+ *
+ * What it does throw for is the document never getting a fair reading: an
+ * unreachable endpoint, a rejected request, a reply the configured token cap cut
+ * short before a single reservation came back. Those have a remedy the operator
+ * can act on, and llm-parse.service.ts turns the message into the warning shown
+ * against the file — an empty array would say "nothing in this document" and
+ * hide the reason.
  */
 export interface LlmExtractionClient {
   extract(input: LlmExtractionInput): Promise<Record<string, unknown>[]>;
